@@ -1,0 +1,326 @@
+{
+  "main": {
+    "id": "7713f4f53d2a5d06",
+    "type": "split",
+    "children": [
+      {
+        "id": "667ca882d44552f6",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "e60fb164bb3e41ea",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "量子力学初步3.2.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "量子力学初步3.2"
+            }
+          },
+          {
+            "id": "9458fd0d0322aee5",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "计算机组成原理期中复习.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "计算机组成原理期中复习"
+            }
+          },
+          {
+            "id": "5e023c1fadf89fb3",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "课程笔记/量子物理初步.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "量子物理初步"
+            }
+          },
+          {
+            "id": "6b3dd729be52e647",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "课程笔记/计算机组成原理期中复习.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "计算机组成原理期中复习"
+            }
+          }
+        ],
+        "currentTab": 3
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "53baf1d47ef68972",
+    "type": "split",
+    "children": [
+      {
+        "id": "07d41dc01b2ed1c4",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "e6dd7caec957892e",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "bb3bcedbba78aae2",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "原子物理",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "4547d9a8e686d2c9",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "47e44d3f7370f291",
+    "type": "split",
+    "children": [
+      {
+        "id": "76f24388198131c9",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "49805d002a7e79c4",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "光学/第5章 光的偏振和光在晶体中的传播 复习讲义.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "第5章 光的偏振和光在晶体中的传播 复习讲义 的反向链接列表"
+            }
+          },
+          {
+            "id": "9d87433b6a6bc812",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "卢瑟福散射和库仑散射.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "卢瑟福散射和库仑散射 的出链列表"
+            }
+          },
+          {
+            "id": "bc5953235cf86067",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "84e5fb9cbd2d40b6",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "量子力学初步3.2.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "量子力学初步3.2 的大纲"
+            }
+          },
+          {
+            "id": "173aed81ba63dcd2",
+            "type": "leaf",
+            "state": {
+              "type": "quiet-outline",
+              "state": {},
+              "icon": "lines-of-text",
+              "title": "Quiet Outline"
+            }
+          },
+          {
+            "id": "db6c8041eaaadffd",
+            "type": "leaf",
+            "state": {
+              "type": "advanced-tables-toolbar",
+              "state": {},
+              "icon": "spreadsheet",
+              "title": "Advanced Tables"
+            }
+          },
+          {
+            "id": "07a2c6a5d28274a4",
+            "type": "leaf",
+            "state": {
+              "type": "claudian-view",
+              "state": {},
+              "icon": "bot",
+              "title": "Claudian"
+            }
+          },
+          {
+            "id": "ab04a1d9049c36ef",
+            "type": "leaf",
+            "state": {
+              "type": "calendar",
+              "state": {},
+              "icon": "calendar-with-checkmark",
+              "title": "Calendar"
+            }
+          },
+          {
+            "id": "f92564242c658b96",
+            "type": "leaf",
+            "state": {
+              "type": "git-view",
+              "state": {},
+              "icon": "git-pull-request",
+              "title": "Source Control"
+            }
+          }
+        ],
+        "currentTab": 8
+      }
+    ],
+    "direction": "horizontal",
+    "width": 256.5
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "bases:新建数据库": false,
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "obsidian-excalidraw-plugin:新建绘图文件": false,
+      "remotely-save:Remotely Save": false,
+      "table-editor-obsidian:Advanced Tables Toolbar": false,
+      "xiaohongshu-importer:Import Xiaohongshu note": false,
+      "claudian:Open Claudian": false,
+      "templater-obsidian:Templater": false,
+      "obsidian-git:Open Git source control": false,
+      "pdf-plus:PDF++: Toggle auto-copy": false,
+      "pdf-plus:PDF++: Toggle auto-focus": false,
+      "pdf-plus:PDF++: Toggle auto-paste": false
+    }
+  },
+  "active": "6b3dd729be52e647",
+  "lastOpenFiles": [
+    "课程笔记/指令执行过程.md",
+    "课程笔记/计算机系统和冯诺依曼结构.md",
+    "daily/2026-04-20.md",
+    "Templates/diary template.md",
+    "daily/未命名.md",
+    "daily/未命名 1.md",
+    "Templates/Daily Task.md",
+    "Templates/Daily Task.md.tmp.28624.1776681841260",
+    "Templates/Daily Task.md.tmp.28624.1776681828816",
+    "Templates/Daily Task.md.tmp.28624.1776681823274",
+    "Templates/Daily Task.md.tmp.28624.1776681816776",
+    "Templates/Daily Task.md.tmp.28624.1776681808764",
+    "Templates/Daily Task.md.tmp.28624.1776681715543",
+    "Templates/Daily Task.md.tmp.28624.1776681693637",
+    "课程笔记/量子物理初步.md",
+    "Templates",
+    "template diary.md",
+    "daily",
+    "新建文件夹",
+    "课程学习仓库/cs336/assignment1-basics/README.md",
+    "课程学习仓库/cs336/assignment1-basics/AGENTS.md",
+    "课程学习仓库/cs336/assignment1-basics/CLAUDE.md",
+    "课程学习仓库/cs336/assignment1-basics/CHANGELOG.md",
+    "课程笔记/原子物理笔记.md",
+    "课程笔记/玻尔氢原子理论.md",
+    "课程笔记/电子磁矩和自旋.md",
+    "计算机组成原理期中复习.md",
+    "XHS Notes/个人成长/[V]我用obsidian+AI打造生活、知识、创作系统.md",
+    "Excalidraw/指令执行过程.md",
+    "Excalidraw/计算机系统和冯诺依曼结构.md",
+    "未命名 1.md",
+    "量子力学初步3.2.md",
+    "原子物理笔记.md",
+    "电子磁矩和自旋.md",
+    "卢瑟福散射和库仑散射.md",
+    "量子物理初步.md",
+    "Pasted image 20260324190702.png",
+    "Pasted image 20260323190211.png",
+    "Pasted image 20260323190157.png",
+    "Pasted image 20260323185327.png",
+    "Pasted image 20260323163614.png",
+    "Pasted image 20260323163447.png",
+    "Pasted image 20260323163354.png",
+    "Pasted image 20260318120709.png",
+    "Pasted image 20260317224331.png",
+    "Pasted image 20260317221329.png",
+    "未命名.canvas",
+    "未命名 1.canvas"
+  ]
+}

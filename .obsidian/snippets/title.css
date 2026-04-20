@@ -1,0 +1,34 @@
+ol {
+  counter-reset: item;
+}
+
+ol li {
+  display: block;
+}
+
+ol li:before {
+  content: counters(item, ".") ". ";
+  counter-increment: item;
+  padding-right: 5px;
+}
+/* reading mode */
+.image-embed[alt]:after {
+    content: attr(alt);
+    display: block;
+    margin: 0.2rem 1rem 1rem 1rem;
+    font-size: 90%;
+    line-height: 1.4;
+    color: var(--text-faint);
+    text-align: center;
+
+}
+/* source view and live preview */
+.image-embed[alt]:after {
+    content: attr(alt);
+    display: block;
+    margin: 0.2rem 1rem 1rem 1rem;
+    font-size: 90%;
+    line-height: 1.4;
+    color: var(--text-faint);
+    text-align: center;
+}

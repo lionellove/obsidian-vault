@@ -1,0 +1,24 @@
+{
+  "id": "conv-1776681223967-i6cvey7zf",
+  "providerId": "claude",
+  "title": "---",
+  "titleGenerationStatus": "failed",
+  "createdAt": 1776681223968,
+  "updatedAt": 1776681848438,
+  "lastResponseAt": 1776681848438,
+  "sessionId": "519322d5-9f67-4c58-97c8-af777c156bd8",
+  "providerState": {
+    "providerSessionId": "519322d5-9f67-4c58-97c8-af777c156bd8"
+  },
+  "currentNote": "Templates/diary template.md",
+  "usage": {
+    "model": "opus",
+    "inputTokens": 56656,
+    "cacheCreationInputTokens": 0,
+    "cacheReadInputTokens": 0,
+    "contextWindow": 200000,
+    "contextTokens": 56656,
+    "percentage": 28,
+    "contextWindowIsAuthoritative": true
+  }
+}
