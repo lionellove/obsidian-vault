@@ -1,0 +1,24 @@
+{
+  "id": "conv-1777702737163-nycul4t67",
+  "providerId": "claude",
+  "title": "帮我给损失函数和激活函数小节下的表格中的函数加上函数的数学形式，",
+  "titleGenerationStatus": "failed",
+  "createdAt": 1777702737888,
+  "updatedAt": 1777706076591,
+  "lastResponseAt": 1777702801458,
+  "sessionId": "70f4ae26-f2fb-4acb-8182-7512c8432ec3",
+  "providerState": {
+    "providerSessionId": "70f4ae26-f2fb-4acb-8182-7512c8432ec3"
+  },
+  "currentNote": "课程笔记/深度学习的概率基础.md",
+  "usage": {
+    "model": "opus",
+    "inputTokens": 55132,
+    "cacheCreationInputTokens": 0,
+    "cacheReadInputTokens": 0,
+    "contextWindow": 200000,
+    "contextTokens": 55132,
+    "percentage": 28,
+    "contextWindowIsAuthoritative": true
+  }
+}

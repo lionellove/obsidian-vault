@@ -1,0 +1,23 @@
+{
+  "id": "conv-1776779101014-zcqevltj0",
+  "providerId": "claude",
+  "title": "搜索课程笔记中所有带原子物理标签的笔记，提取其中的公式，汇总到公式",
+  "titleGenerationStatus": "failed",
+  "createdAt": 1776779101025,
+  "updatedAt": 1777199547586,
+  "lastResponseAt": 1776937085297,
+  "sessionId": "6e2cdde4-eebd-489e-b223-36128c7ba95e",
+  "providerState": {
+    "providerSessionId": "6e2cdde4-eebd-489e-b223-36128c7ba95e"
+  },
+  "usage": {
+    "model": "opus",
+    "inputTokens": 56009,
+    "cacheCreationInputTokens": 0,
+    "cacheReadInputTokens": 0,
+    "contextWindow": 200000,
+    "contextTokens": 56009,
+    "percentage": 28,
+    "contextWindowIsAuthoritative": true
+  }
+}

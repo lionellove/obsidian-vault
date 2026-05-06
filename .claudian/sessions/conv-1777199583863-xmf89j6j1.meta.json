@@ -1,0 +1,24 @@
+{
+  "id": "conv-1777199583863-xmf89j6j1",
+  "providerId": "claude",
+  "title": "比较tcs定义",
+  "titleGenerationStatus": "failed",
+  "createdAt": 1777199583872,
+  "updatedAt": 1777706079708,
+  "lastResponseAt": 1777199775516,
+  "sessionId": "54b3eddf-7cf1-40b0-8202-8f61ce6777d8",
+  "providerState": {
+    "providerSessionId": "54b3eddf-7cf1-40b0-8202-8f61ce6777d8"
+  },
+  "currentNote": "课程笔记/tcs定义.md",
+  "usage": {
+    "model": "opus",
+    "inputTokens": 55553,
+    "cacheCreationInputTokens": 0,
+    "cacheReadInputTokens": 0,
+    "contextWindow": 200000,
+    "contextTokens": 55553,
+    "percentage": 28,
+    "contextWindowIsAuthoritative": true
+  }
+}

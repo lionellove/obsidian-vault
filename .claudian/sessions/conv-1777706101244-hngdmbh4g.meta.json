@@ -1,0 +1,24 @@
+{
+  "id": "conv-1777706101244-hngdmbh4g",
+  "providerId": "claude",
+  "title": "帮我总结这本书中第五章Single-layer Networks Classification",
+  "titleGenerationStatus": "failed",
+  "createdAt": 1777706101245,
+  "updatedAt": 1777710093696,
+  "lastResponseAt": 1777710093696,
+  "sessionId": "4ec588dd-e709-42ca-991b-9d497b7d5351",
+  "providerState": {
+    "providerSessionId": "4ec588dd-e709-42ca-991b-9d497b7d5351"
+  },
+  "currentNote": "课程学习仓库/Bishop和Bishop - 2024 - Deep Learning Foundations and Concepts.pdf",
+  "usage": {
+    "model": "opus",
+    "inputTokens": 62275,
+    "cacheCreationInputTokens": 0,
+    "cacheReadInputTokens": 0,
+    "contextWindow": 200000,
+    "contextTokens": 62275,
+    "percentage": 31,
+    "contextWindowIsAuthoritative": true
+  }
+}

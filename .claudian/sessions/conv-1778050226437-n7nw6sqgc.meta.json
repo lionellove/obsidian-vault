@@ -1,0 +1,23 @@
+{
+  "id": "conv-1778050226437-n7nw6sqgc",
+  "providerId": "claude",
+  "title": "Guide git revert of deleted files",
+  "titleGenerationStatus": "success",
+  "createdAt": 1778050226437,
+  "updatedAt": 1778052034311,
+  "lastResponseAt": 1778052034311,
+  "sessionId": "e41cf4f4-1836-4b60-8079-87f20025b6bd",
+  "providerState": {
+    "providerSessionId": "e41cf4f4-1836-4b60-8079-87f20025b6bd"
+  },
+  "usage": {
+    "model": "opus",
+    "inputTokens": 50,
+    "cacheCreationInputTokens": 0,
+    "cacheReadInputTokens": 37760,
+    "contextWindow": 200000,
+    "contextTokens": 37810,
+    "percentage": 19,
+    "contextWindowIsAuthoritative": true
+  }
+}

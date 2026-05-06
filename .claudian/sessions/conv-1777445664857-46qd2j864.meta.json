@@ -1,0 +1,24 @@
+{
+  "id": "conv-1777445664857-46qd2j864",
+  "providerId": "claude",
+  "title": "阅读ch5",
+  "titleGenerationStatus": "failed",
+  "createdAt": 1777445664865,
+  "updatedAt": 1777706077445,
+  "lastResponseAt": 1777446067518,
+  "sessionId": "67b8655a-bf79-49a1-b2bf-22a81f77489d",
+  "providerState": {
+    "providerSessionId": "67b8655a-bf79-49a1-b2bf-22a81f77489d"
+  },
+  "currentNote": "多电子原子.md",
+  "usage": {
+    "model": "opus",
+    "inputTokens": 55324,
+    "cacheCreationInputTokens": 0,
+    "cacheReadInputTokens": 0,
+    "contextWindow": 200000,
+    "contextTokens": 55324,
+    "percentage": 28,
+    "contextWindowIsAuthoritative": true
+  }
+}
