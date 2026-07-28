@@ -1,0 +1,13 @@
+smolagents[mcp]==1.26.0
+mcpadapt==0.1.20
+datasets==5.0.0
+huggingface-hub==1.24.0
+python-dotenv==1.2.2
+arize-phoenix==19.2.0
+openinference-instrumentation-smolagents==0.1.32
+PyMuPDF==1.28.0
+Pillow==12.3.0
+openai==2.46.0
+PyYAML==6.0.3
+requests==2.34.2
+mcp==1.28.1
