@@ -22,10 +22,22 @@ class _FakeOpenAIHandler(BaseHTTPRequestHandler):
         length = int(self.headers["Content-Length"])
         request = json.loads(self.rfile.read(length))
         self.__class__.requests.append(request)
+        if self.__class__.mode == "provider_error":
+            encoded = json.dumps(
+                {"error": {"message": "simulated provider failure"}}
+            ).encode("utf-8")
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
         has_tool_result = any(
             message.get("role") == "tool"
             for message in request.get("messages", [])
         )
+        if self.__class__.mode == "always_tool_loop":
+            has_tool_result = False
 
         if self.__class__.mode == "no_marker":
             chunks = [
@@ -253,6 +265,83 @@ class PiEndToEndTests(unittest.TestCase):
 
         self.assertEqual(response["errorType"], "answer_format_error", stderr)
         self.assertEqual(response["terminatedBy"], "answer_format_error")
+        self.assertIsNone(response["prediction"])
+
+    def test_provider_error_is_not_reported_as_answer_format_error(self):
+        _FakeOpenAIHandler.requests = []
+        _FakeOpenAIHandler.mode = "provider_error"
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeOpenAIHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base_url = f"http://127.0.0.1:{server.server_port}/v1"
+
+        try:
+            with patch.dict(
+                os.environ,
+                {
+                    "MODEL_ID": "fake-gaia",
+                    "OPENAI_BASE_URL": base_url,
+                    "OPENAI_API_KEY": "offline-test-key",
+                },
+                clear=False,
+            ):
+                request = gaia.build_pi_request(
+                    prompt="Trigger a simulated provider failure.",
+                    cwd=ROOT,
+                    max_turns=2,
+                    use_image_tool=False,
+                    tool_timeout_seconds=20,
+                )
+                response, stderr = gaia.invoke_pi(
+                    request,
+                    timeout_seconds=90,
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(response["errorType"], "model_error", stderr)
+        self.assertEqual(response["terminatedBy"], "model_error")
+        self.assertIsNone(response["prediction"])
+        self.assertIn("simulated provider failure", response["error"])
+
+    def test_turn_limit_is_not_reported_as_answer_format_error(self):
+        _FakeOpenAIHandler.requests = []
+        _FakeOpenAIHandler.mode = "always_tool_loop"
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeOpenAIHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base_url = f"http://127.0.0.1:{server.server_port}/v1"
+
+        try:
+            with patch.dict(
+                os.environ,
+                {
+                    "MODEL_ID": "fake-gaia",
+                    "OPENAI_BASE_URL": base_url,
+                    "OPENAI_API_KEY": "offline-test-key",
+                },
+                clear=False,
+            ):
+                request = gaia.build_pi_request(
+                    prompt="Keep calling Python until the runner stops.",
+                    cwd=ROOT,
+                    max_turns=1,
+                    use_image_tool=False,
+                    tool_timeout_seconds=20,
+                )
+                response, stderr = gaia.invoke_pi(
+                    request,
+                    timeout_seconds=90,
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(response["errorType"], "max_turns", stderr)
+        self.assertEqual(response["terminatedBy"], "max_turns")
         self.assertIsNone(response["prediction"])
 
 

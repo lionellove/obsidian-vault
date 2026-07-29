@@ -86,8 +86,32 @@ Python 工具采用长驻 JSONL bridge，避免每次调用重新导入模型客
 显式白名单中的工具名，单次工具调用有超时；超时后会终止 bridge，防止迟到响应污染
 下一次调用。
 
-这个版本没有迁移旧 runner 的 Docker MCP / 外部 MCP 配置。需要 MCP 时，应在 Pi
-侧新增经过白名单审计的 custom tool，而不是把旧的 smolagents tool 对象直接注入。
+传入 `--external-tools-config .\external_tools.json` 后，Pi 会通过官方 MCP
+TypeScript client 启动配置中的 stdio server 组，动态发现 allowlist 中的工具，
+并把 JSON Schema 转换成 Pi custom tools。Pi 不依赖 smolagents 的 Tool 对象。
+当前配置直接启动 `gaia` profile 固定 digest 的 fetch、Playwright、time 三个 Docker
+MCP 镜像；Pi 与 smolagents 共用同一配置和 allowlist。
+同一配置中的 `pi_builtin_tools` 是 Pi 内置工具的显式白名单。默认配置将它设为空：
+编码能力由上面的受限 `python` 提供，不把宿主文件系统或 shell 暴露给网页内容。
+
+```powershell
+python .\gaia.py `
+  --task-id <GAIA-task-id> `
+  --no-image-tool `
+  --external-tools-config .\external_tools.json `
+  --variant pi-docker-mcp-code
+```
+
+MCP 子进程只继承运行所需的系统变量以及 `env_passthrough` 明确列出的变量，
+不会自动收到文本模型 API key。`tool_allowlist` 必须非空，工具数超过 `max_tools`
+时 Pi 会拒绝启动。每个 server 的工具列表会完整翻页；工具结果只接收文本、文本资源
+和结构化 JSON，并限制为 64 KiB。固定 digest 防止评测期间镜像实现漂移。
+
+只有在 **Pi runner 本身已经位于一次性容器/虚拟机内** 时，才使用
+`external_tools.pi-host-code.example.json`。它显式开放
+`read + bash + grep + find + ls`；这些工具使用 runner 的权限，不是 Docker MCP
+容器的权限。不要在存有 `.env`、历史 trace 或个人文件的宿主工作区直接启用它。
+
 附件目前稳定支持图片和 PDF；DOCX、XLSX、PPTX、音频等任务会在 prompt 中明确标为
 无专用解析器，而不会假装已经读到附件内容。
 

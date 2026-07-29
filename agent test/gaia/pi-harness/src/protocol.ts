@@ -8,6 +8,30 @@ export const TOOL_NAMES = [
 
 export type ToolName = (typeof TOOL_NAMES)[number];
 
+export const BUILTIN_TOOL_NAMES = [
+	"read",
+	"bash",
+	"grep",
+	"find",
+	"ls",
+] as const;
+
+export type BuiltinToolName = (typeof BUILTIN_TOOL_NAMES)[number];
+
+export interface McpServerConfig {
+	name: string;
+	command: string;
+	args: string[];
+	envPassthrough: string[];
+}
+
+export interface McpConfig {
+	servers: McpServerConfig[];
+	toolAllowlist: string[];
+	maxTools: number;
+	connectTimeoutMs: number;
+}
+
 export interface RunnerRequest {
 	version: 1;
 	prompt: string;
@@ -19,6 +43,8 @@ export interface RunnerRequest {
 		baseUrl: string;
 	};
 	enabledTools: ToolName[];
+	builtinTools: BuiltinToolName[];
+	mcp?: McpConfig;
 	maxTurns: number;
 	toolTimeoutMs: number;
 }
@@ -111,6 +137,23 @@ function requiredPositiveInteger(
 	return value as number;
 }
 
+function stringArray(
+	object: Record<string, unknown>,
+	key: string,
+): string[] {
+	const value = object[key];
+	if (
+		!Array.isArray(value) ||
+		!value.every((item) => typeof item === "string" && item.trim() !== "")
+	) {
+		throw new TypeError(`${key} must be an array of non-empty strings`);
+	}
+	if (new Set(value).size !== value.length) {
+		throw new TypeError(`${key} must not contain duplicates`);
+	}
+	return value;
+}
+
 export function parseRequest(value: unknown): RunnerRequest {
 	if (!isRecord(value)) {
 		throw new TypeError("runner request must be a JSON object");
@@ -148,6 +191,47 @@ export function parseRequest(value: unknown): RunnerRequest {
 		throw new TypeError("enabledTools must not contain duplicates");
 	}
 
+	const builtinToolValues = stringArray(value, "builtinTools");
+	const allowedBuiltinTools = new Set<string>(BUILTIN_TOOL_NAMES);
+	const builtinTools = builtinToolValues.map((item) => {
+		if (!allowedBuiltinTools.has(item)) {
+			throw new TypeError(`unknown builtin tool: ${item}`);
+		}
+		return item as BuiltinToolName;
+	});
+
+	let mcp: McpConfig | undefined;
+	if (value.mcp !== undefined) {
+		if (!isRecord(value.mcp)) {
+			throw new TypeError("mcp must be a JSON object");
+		}
+		if (
+			!Array.isArray(value.mcp.servers) ||
+			value.mcp.servers.length === 0 ||
+			!value.mcp.servers.every(isRecord)
+		) {
+			throw new TypeError("mcp.servers must be a non-empty array of objects");
+		}
+		const servers = value.mcp.servers.map((server) => ({
+			name: requiredString(server, "name"),
+			command: requiredString(server, "command"),
+			args: stringArray(server, "args"),
+			envPassthrough: stringArray(server, "envPassthrough"),
+		}));
+		if (new Set(servers.map((server) => server.name)).size !== servers.length) {
+			throw new TypeError("mcp server names must not contain duplicates");
+		}
+		mcp = {
+			servers,
+			toolAllowlist: stringArray(value.mcp, "toolAllowlist"),
+			maxTools: requiredPositiveInteger(value.mcp, "maxTools"),
+			connectTimeoutMs: requiredPositiveInteger(
+				value.mcp,
+				"connectTimeoutMs",
+			),
+		};
+	}
+
 	return {
 		version: 1,
 		prompt: requiredString(value, "prompt"),
@@ -156,6 +240,8 @@ export function parseRequest(value: unknown): RunnerRequest {
 		toolBridgePath: requiredString(value, "toolBridgePath"),
 		model: { id: modelId, baseUrl },
 		enabledTools,
+		builtinTools,
+		mcp,
 		maxTurns: requiredPositiveInteger(value, "maxTurns"),
 		toolTimeoutMs: requiredPositiveInteger(value, "toolTimeoutMs"),
 	};

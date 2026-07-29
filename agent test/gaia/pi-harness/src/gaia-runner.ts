@@ -23,6 +23,7 @@ import {
 	summarizeUsage,
 	type ToolName,
 } from "./protocol.ts";
+import { connectMcpTools, type McpToolConnection } from "./mcp-tools.ts";
 
 const PROVIDER_ID = "gaia-openai-compatible";
 
@@ -338,6 +339,21 @@ function assistantText(messages: readonly unknown[]): string {
 	return "";
 }
 
+function assistantModelError(messages: readonly unknown[]): string | undefined {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (!isRecord(message) || message.role !== "assistant") continue;
+		if (
+			message.stopReason === "error" &&
+			typeof message.errorMessage === "string" &&
+			message.errorMessage.trim()
+		) {
+			return message.errorMessage.trim();
+		}
+	}
+	return undefined;
+}
+
 function loggableEvent(event: unknown): unknown | undefined {
 	if (!isRecord(event) || typeof event.type !== "string") return undefined;
 	switch (event.type) {
@@ -422,84 +438,136 @@ async function runAgent(request: RunnerRequest): Promise<RunnerResponse> {
 	const bridge = new ToolBridge(request, (message) =>
 		process.stderr.write(`${message}\n`),
 	);
-	const settingsManager = SettingsManager.inMemory({
-		compaction: { enabled: false },
-		retry: {
-			enabled: true,
-			maxRetries: 2,
-			provider: { timeoutMs: 300_000, maxRetries: 2 },
-		},
-	});
-	const { session } = await createAgentSession({
-		cwd: request.cwd,
-		modelRuntime,
-		model,
-		thinkingLevel: "off",
-		noTools: "builtin",
-		customTools: createGaiaTools(bridge, request.enabledTools),
-		resourceLoader: minimalResourceLoader(),
-		sessionManager: SessionManager.inMemory(request.cwd),
-		settingsManager,
-	});
-
-	let turns = 0;
-	let maxTurnsReached = false;
-	let toolErrorCount = 0;
-	session.subscribe((event) => {
-		const log = loggableEvent(event);
-		if (log) logs.push(log);
-		if (event.type === "turn_end") {
-			turns += 1;
-			if (turns >= request.maxTurns) {
-				maxTurnsReached = true;
-				queueMicrotask(() => void session.abort());
-			}
-		}
-		if (event.type === "tool_execution_end" && event.isError) {
-			toolErrorCount += 1;
-		}
-	});
-
-	let prediction: string | null = null;
-	let error: string | null = null;
-	let errorType: RunnerResponse["errorType"] = null;
+	let mcpConnection: McpToolConnection | undefined;
+	let session:
+		| Awaited<ReturnType<typeof createAgentSession>>["session"]
+		| undefined;
 	try {
-		await session.prompt(request.prompt);
-	} catch (caught) {
-		error =
-			caught instanceof Error
-				? `${caught.name}: ${caught.message}`
-				: `Error: ${String(caught)}`;
-		errorType = maxTurnsReached ? "max_turns" : "model_error";
-	}
-	if (error === null) {
+		const localTools = createGaiaTools(bridge, request.enabledTools);
+		const reservedToolNames = new Set([
+			...request.enabledTools,
+			...request.builtinTools,
+		]);
+		if (request.mcp) {
+			mcpConnection = await connectMcpTools(
+				request.mcp,
+				reservedToolNames,
+				request.toolTimeoutMs,
+				(message) => process.stderr.write(`${message}\n`),
+			);
+		}
+		const customTools = [...localTools, ...(mcpConnection?.tools ?? [])];
+		const activeToolNames = [
+			...request.builtinTools,
+			...customTools.map((tool) => tool.name),
+		];
+		const settingsManager = SettingsManager.inMemory({
+			compaction: { enabled: false },
+			retry: {
+				enabled: true,
+				maxRetries: 2,
+				provider: { timeoutMs: 300_000, maxRetries: 2 },
+			},
+		});
+		const sessionResult = await createAgentSession({
+			cwd: request.cwd,
+			modelRuntime,
+			model,
+			thinkingLevel: "off",
+			tools: activeToolNames,
+			customTools,
+			resourceLoader: minimalResourceLoader(),
+			sessionManager: SessionManager.inMemory(request.cwd),
+			settingsManager,
+		});
+		session = sessionResult.session;
+		const activeSession = session;
+
+		let turns = 0;
+		let maxTurnsReached = false;
+		let toolErrorCount = 0;
+		activeSession.subscribe((event) => {
+			const log = loggableEvent(event);
+			if (log) logs.push(log);
+			if (event.type === "turn_end") {
+				turns += 1;
+				const needsAnotherTurn =
+					isRecord(event.message) && event.message.stopReason === "toolUse";
+				if (turns >= request.maxTurns && needsAnotherTurn) {
+					maxTurnsReached = true;
+					queueMicrotask(() => void activeSession.abort());
+				}
+			}
+			if (event.type === "tool_execution_end" && event.isError) {
+				toolErrorCount += 1;
+			}
+		});
+
+		let prediction: string | null = null;
+		let error: string | null = null;
+		let errorType: RunnerResponse["errorType"] = null;
 		try {
-			prediction = extractFinalAnswer(assistantText(session.messages));
+			await activeSession.prompt(request.prompt);
 		} catch (caught) {
 			error =
 				caught instanceof Error
 					? `${caught.name}: ${caught.message}`
 					: `Error: ${String(caught)}`;
-			errorType = "answer_format_error";
+			errorType = maxTurnsReached ? "max_turns" : "model_error";
 		}
-	}
+		if (error === null && maxTurnsReached) {
+			error = `Error: Agent reached the ${request.maxTurns}-turn limit`;
+			errorType = "max_turns";
+		}
+		if (error === null) {
+			const modelError = assistantModelError(activeSession.messages);
+			if (modelError) {
+				error = `Error: ${modelError}`;
+				errorType = "model_error";
+			}
+		}
+		if (error === null) {
+			try {
+				prediction = extractFinalAnswer(
+					assistantText(activeSession.messages),
+				);
+			} catch (caught) {
+				error =
+					caught instanceof Error
+						? `${caught.name}: ${caught.message}`
+						: `Error: ${String(caught)}`;
+				errorType = "answer_format_error";
+			}
+		}
 
-	const memoryMessages = [...session.messages];
-	const response: RunnerResponse = {
-		protocolVersion: 1,
-		prediction,
-		error,
-		errorType,
-		tokenCounts: summarizeUsage(memoryMessages),
-		toolErrorCount,
-		turns,
-		terminatedBy: errorType ?? "assistant",
-		logs,
-		memoryMessages,
-	};
-	session.dispose();
-	bridge.stop();
-	return response;
+		const memoryMessages = [...activeSession.messages];
+		return {
+			protocolVersion: 1,
+			prediction,
+			error,
+			errorType,
+			tokenCounts: summarizeUsage(memoryMessages),
+			toolErrorCount,
+			turns,
+			terminatedBy: errorType ?? "assistant",
+			logs,
+			memoryMessages,
+		};
+	} finally {
+		try {
+			session?.dispose();
+		} catch (error) {
+			process.stderr.write(`[pi] session cleanup failed: ${String(error)}\n`);
+		}
+		try {
+			bridge.stop();
+		} catch (error) {
+			process.stderr.write(`[bridge] cleanup failed: ${String(error)}\n`);
+		}
+		await mcpConnection?.close().catch((error) => {
+			process.stderr.write(`[mcp] cleanup failed: ${String(error)}\n`);
+		});
+	}
 }
 
 async function readStdinJson(): Promise<unknown> {

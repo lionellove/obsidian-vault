@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -83,6 +84,123 @@ class PiRequestTests(unittest.TestCase):
         self.assertEqual(
             request["enabledTools"],
             ["web_search", "extract_pdf_text", "python"],
+        )
+
+    def test_request_loads_docker_mcp_and_pi_builtin_tools(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_file = Path(directory) / "external_tools.json"
+            config_file.write_text(
+                """
+                {
+                  "docker_mcp": {
+                    "profile": "gaia",
+                    "connect_timeout_seconds": 180
+                  },
+                  "tool_allowlist": ["fetch", "browser_navigate"],
+                  "max_tools": 12,
+                  "pi_builtin_tools": ["read", "bash", "grep", "find", "ls"]
+                }
+                """,
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "MODEL_ID": "model",
+                    "OPENAI_BASE_URL": "https://example.test/v1",
+                    "OPENAI_API_KEY": "secret",
+                },
+                clear=True,
+            ):
+                request = gaia.build_pi_request(
+                    prompt="Question",
+                    cwd=ROOT,
+                    max_turns=8,
+                    use_image_tool=False,
+                    tool_timeout_seconds=10,
+                    external_tools_config=config_file,
+                )
+
+        self.assertEqual(
+            request["builtinTools"],
+            ["read", "bash", "grep", "find", "ls"],
+        )
+        self.assertEqual(
+            request["mcp"],
+            {
+                "servers": [
+                    {
+                        "name": "docker-mcp-gaia",
+                        "command": "docker",
+                        "args": [
+                            "mcp",
+                            "gateway",
+                            "run",
+                            "--profile",
+                            "gaia",
+                            "--static",
+                        ],
+                        "envPassthrough": [],
+                    },
+                ],
+                "toolAllowlist": ["fetch", "browser_navigate"],
+                "maxTools": 12,
+                "connectTimeoutMs": 180_000,
+            },
+        )
+
+    def test_request_loads_a_direct_docker_mcp_server_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_file = Path(directory) / "external_tools.json"
+            config_file.write_text(
+                """
+                {
+                  "mcp_servers": [
+                    {
+                      "name": "fetch",
+                      "transport": "stdio",
+                      "command": "docker",
+                      "args": ["run", "--rm", "-i", "mcp/fetch@sha256:one"]
+                    },
+                    {
+                      "name": "time",
+                      "transport": "stdio",
+                      "command": "docker",
+                      "args": ["run", "--rm", "-i", "mcp/time@sha256:two"]
+                    }
+                  ],
+                  "tool_allowlist": ["fetch", "get_current_time"],
+                  "max_tools": 2,
+                  "pi_builtin_tools": ["read", "bash"]
+                }
+                """,
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "MODEL_ID": "model",
+                    "OPENAI_BASE_URL": "https://example.test/v1",
+                    "OPENAI_API_KEY": "secret",
+                },
+                clear=True,
+            ):
+                request = gaia.build_pi_request(
+                    prompt="Question",
+                    cwd=ROOT,
+                    max_turns=8,
+                    use_image_tool=False,
+                    tool_timeout_seconds=10,
+                    external_tools_config=config_file,
+                )
+
+        self.assertEqual(
+            [server["name"] for server in request["mcp"]["servers"]],
+            ["fetch", "time"],
+        )
+        self.assertEqual(
+            request["mcp"]["toolAllowlist"],
+            ["fetch", "get_current_time"],
         )
 
     def test_safe_variant_rejects_empty_values(self):

@@ -14,6 +14,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from external_tools import docker_mcp_server, read_external_tool_config
 from load_skill import discover_skills, render_skills
 
 
@@ -66,6 +67,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--tool-timeout-seconds", type=int, default=120)
     parser.add_argument("--runner-timeout-seconds", type=int, default=3600)
+    parser.add_argument(
+        "--external-tools-config",
+        type=Path,
+        help=(
+            "Shared audited Docker MCP config; also controls the Pi built-in "
+            "coding-tool allowlist"
+        ),
+    )
     parser.add_argument(
         "--include-reference-answer",
         action="store_true",
@@ -232,6 +241,7 @@ def build_pi_request(
     max_turns: int,
     use_image_tool: bool,
     tool_timeout_seconds: int,
+    external_tools_config: Path | None = None,
 ) -> dict[str, Any]:
     if max_turns < 1:
         raise ValueError("max_turns must be at least 1")
@@ -243,7 +253,7 @@ def build_pi_request(
     if use_image_tool:
         enabled_tools.append("analyze_image")
 
-    return {
+    request: dict[str, Any] = {
         "version": 1,
         "prompt": prompt,
         "cwd": str(cwd.resolve()),
@@ -254,9 +264,76 @@ def build_pi_request(
             "baseUrl": _required_env("OPENAI_BASE_URL"),
         },
         "enabledTools": enabled_tools,
+        "builtinTools": [],
         "maxTurns": max_turns,
         "toolTimeoutMs": tool_timeout_seconds * 1000,
     }
+    if external_tools_config is not None:
+        config = read_external_tool_config(external_tools_config)
+        if config.get("hub_tools"):
+            raise ValueError(
+                "The Pi runner does not load Hugging Face Hub tools; expose "
+                "audited tools through MCP instead"
+            )
+        request["builtinTools"] = list(config.get("pi_builtin_tools", []))
+        servers: list[dict[str, Any]] = []
+        connect_timeout_seconds = config.get("connect_timeout_seconds", 60)
+        if "docker_mcp" in config:
+            server = docker_mcp_server(config["docker_mcp"])
+            servers.append(
+                {
+                    "name": f"docker-mcp-{config['docker_mcp']['profile']}",
+                    "command": server["command"],
+                    "args": server["args"],
+                    "envPassthrough": server["env_passthrough"],
+                }
+            )
+            connect_timeout_seconds = config.get(
+                "connect_timeout_seconds",
+                config["docker_mcp"].get("connect_timeout_seconds", 60),
+            )
+        for index, server in enumerate(config.get("mcp_servers", []), start=1):
+            transport = server.get("transport", "streamable-http")
+            if transport != "stdio":
+                raise ValueError(
+                    "The Pi runner currently supports stdio MCP servers only"
+                )
+            name = server.get("name", f"mcp-{index}")
+            command = server.get("command")
+            args = server.get("args", [])
+            env_passthrough = server.get("env_passthrough", [])
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("Every Pi MCP server name must be non-empty")
+            if not isinstance(command, str) or not command.strip():
+                raise ValueError("Every Pi stdio MCP command must be non-empty")
+            if not isinstance(args, list) or not all(
+                isinstance(arg, str) for arg in args
+            ):
+                raise ValueError("Every Pi stdio MCP args value must be a list")
+            if not isinstance(env_passthrough, list) or not all(
+                isinstance(item, str) and item for item in env_passthrough
+            ):
+                raise ValueError(
+                    "Every Pi MCP env_passthrough value must be a string list"
+                )
+            servers.append(
+                {
+                    "name": name,
+                    "command": command,
+                    "args": args,
+                    "envPassthrough": env_passthrough,
+                }
+            )
+        if servers:
+            if not config.get("tool_allowlist"):
+                raise ValueError("Pi requires a non-empty MCP tool_allowlist")
+            request["mcp"] = {
+                "servers": servers,
+                "toolAllowlist": list(config["tool_allowlist"]),
+                "maxTools": config.get("max_tools", 12),
+                "connectTimeoutMs": connect_timeout_seconds * 1000,
+            }
+    return request
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
@@ -354,6 +431,7 @@ def run_task(
     max_turns_override: int | None,
     tool_timeout_seconds: int,
     runner_timeout_seconds: int,
+    external_tools_config: Path | None,
     tracer: Any | None,
 ) -> None:
     level = level_of(row)
@@ -371,6 +449,7 @@ def run_task(
         max_turns=max_turns,
         use_image_tool=use_image_tool,
         tool_timeout_seconds=tool_timeout_seconds,
+        external_tools_config=external_tools_config,
     )
 
     start = time.perf_counter()
@@ -425,6 +504,12 @@ def run_task(
             "skills": skill_names,
             "image_tool": use_image_tool,
             "tools": request["enabledTools"],
+            "builtin_tools": request["builtinTools"],
+            "mcp_tools": (
+                request["mcp"]["toolAllowlist"]
+                if "mcp" in request
+                else []
+            ),
             "attachment": str(attachment) if attachment else None,
             "max_turns": max_turns,
             "tool_timeout_seconds": tool_timeout_seconds,
@@ -506,6 +591,7 @@ def main() -> None:
             max_turns_override=args.max_turns,
             tool_timeout_seconds=args.tool_timeout_seconds,
             runner_timeout_seconds=args.runner_timeout_seconds,
+            external_tools_config=args.external_tools_config,
             tracer=tracer,
         )
         if tracer_provider is not None:

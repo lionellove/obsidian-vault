@@ -116,6 +116,34 @@ python .\run_gaia_sample.py `
   --variant general-with-docker-mcp
 ```
 
+在当前 Windows 环境中，Docker MCP CLI v0.42.2 的宿主 Gateway 会因为 PATH 中没有
+`socat` 而无法启动业务 server。项目的默认 `external_tools.json` 因此采用更窄的
+安全路径：直接以 stdio 启动 profile 中相同固定 digest 的 fetch、Playwright、time
+容器，不挂载 Docker socket 或宿主目录。可用
+`external_tools.docker-direct.example.json` 重建该配置；Gateway 问题修复后也可以
+继续使用 `external_tools.docker.example.json`。
+
+同一份 direct 配置可以交给 Pi 或 smolagents。配置里的 `pi_builtin_tools` 只影响 Pi，
+smolagents 会忽略该字段：
+
+```powershell
+python .\gaia.py `
+  --task-id <GAIA-task-id> `
+  --no-image-tool `
+  --external-tools-config .\external_tools.json `
+  --variant pi-docker-mcp-code
+```
+
+当前 allowlist 包含 `fetch`、精选 Playwright 导航/交互工具和时区工具，共 12 个；
+没有开放文件上传和浏览器任意代码执行。默认 `pi_builtin_tools=[]`，编码由受限
+`python` 工具提供；它不能读文件、环境变量或网络。这样网页 prompt injection
+不能直接转成宿主 shell 命令。
+
+若 Pi runner 已经放进一次性容器或虚拟机，并且只挂载临时任务目录，可以复制
+`external_tools.pi-host-code.example.json`。该显式 opt-in 配置开放
+`read + bash + grep + find + ls`，仍不开放 `edit/write`。不要在包含 `.env`、
+历史 trace 或个人源码的宿主目录中使用它。
+
 `DeepSeek-V4-Flash` 负责文本推理和工具选择；它不直接接收图片。保留
 `--image-tool` 后，`AnalyzeImageTool` 会惰性连接 `.env` 中配置的硅基流动
 多模态模型，并把图片内容转成文本。底层使用 OpenAI-compatible
@@ -125,6 +153,8 @@ python .\run_gaia_sample.py `
 运行。需要缩小 Profile 或用 `tool_allowlist` 精确选择工具，而不是盲目提高上限。
 Gateway 固定使用 `--static`，因此 Agent 不能在评测过程中动态安装或替换 Server。
 `connect_timeout_seconds=180` 用于容纳首次镜像拉取；镜像缓存后通常会更快。
+Pi 会逐个 server 拉取全部工具分页；返回模型前，MCP 输出会过滤二进制内容并截断到
+64 KiB，避免大响应挤占上下文或 trace。
 
 MCP 子进程默认只收到运行所需的系统环境变量，不会自动继承
 `OPENAI_API_KEY`、`HF_TOKEN`、`SILICON_TOKEN` 等密钥。某个 Server 确实需要环境变量时，
@@ -150,6 +180,22 @@ python .\run_gaia_sample.py `
 
 stdio server 会在 runner 生命周期内启动并关闭；远程 MCP 直接连接 URL。不要把
 示例占位 server 原样运行。
+
+### 4.3 建议继续开放的工具
+
+按收益和风险，建议分 Profile 增加，而不是把所有工具放进 `gaia`：
+
+1. `gaia-research`：GitHub issue/commit/timeline 只读查询、Wikidata/MediaWiki、
+   PubChem/NCBI 等结构化公共 API。优先采用专用只读工具，不开放通用带凭证 HTTP。
+2. `gaia-code`：有 CPU、内存、时间和网络限制的状态化 Python 容器。每题复用同一
+   工作目录，题目之间销毁；不挂载 Docker socket、`.env`、`.git` 或历史 trace。
+3. `gaia-docs`：DOCX/XLSX/PPTX/HTML/ZIP 的只读提取器，只挂载临时附件目录；
+   对压缩包设置展开大小和文件数上限。
+
+暂不建议开放：宿主机任意 filesystem、`docker.sock`、secret manager、邮件/网盘、
+浏览器文件上传、任意网页 JavaScript、无域名限制的带凭证请求，以及直接写项目文件
+的 `edit/write`。工具描述和网页内容都按不可信输入处理；每个实验条件最好保持
+8–15 个工具，并为 Pi 与 smolagents 使用同一 MCP allowlist。
 
 ## 5. 只做本地验证
 

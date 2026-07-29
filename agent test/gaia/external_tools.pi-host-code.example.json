@@ -1,0 +1,60 @@
+{
+  "mcp_servers": [
+    {
+      "name": "fetch",
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "mcp/fetch@sha256:1a7a0996a565a0b8ca5c41b42830d4e5f334d33f851596bbd9debb2beedb22d3"
+      ]
+    },
+    {
+      "name": "playwright",
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "mcp/playwright@sha256:8771dc4666e7c11440bfc6a0c6b00480e9a15b8891b45f29a52d7d995f8d1492"
+      ]
+    },
+    {
+      "name": "time",
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "mcp/time@sha256:9c46a918633fb474bf8035e3ee90ebac6bcf2b18ccb00679ac4c179cba0ebfcf"
+      ]
+    }
+  ],
+  "connect_timeout_seconds": 360,
+  "tool_allowlist": [
+    "fetch",
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_fill_form",
+    "browser_select_option",
+    "browser_press_key",
+    "browser_wait_for",
+    "browser_tabs",
+    "get_current_time",
+    "convert_time"
+  ],
+  "max_tools": 12,
+  "pi_builtin_tools": [
+    "read",
+    "bash",
+    "grep",
+    "find",
+    "ls"
+  ]
+}

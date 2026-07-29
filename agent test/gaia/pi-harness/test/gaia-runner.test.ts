@@ -49,11 +49,40 @@ test("parseRequest validates the protocol without accepting API keys", () => {
 			baseUrl: "https://api.deepseek.com",
 		},
 		enabledTools: ["web_search"],
+		builtinTools: ["read", "bash", "grep", "find", "ls"],
+		mcp: {
+			servers: [
+				{
+					name: "gaia",
+					command: "docker",
+					args: [
+						"mcp",
+						"gateway",
+						"run",
+						"--profile",
+						"gaia",
+						"--static",
+					],
+					envPassthrough: [],
+				},
+			],
+			toolAllowlist: ["fetch", "browser_navigate"],
+			maxTools: 12,
+			connectTimeoutMs: 180_000,
+		},
 		maxTurns: 8,
 		toolTimeoutMs: 10_000,
 	});
 
 	assert.equal(parsed.model.id, "deepseek-v4-flash");
+	assert.deepEqual(parsed.builtinTools, [
+		"read",
+		"bash",
+		"grep",
+		"find",
+		"ls",
+	]);
+	assert.equal(parsed.mcp?.servers[0]?.command, "docker");
 	assert.throws(
 		() =>
 			parseRequest({
@@ -61,6 +90,14 @@ test("parseRequest validates the protocol without accepting API keys", () => {
 				model: { ...parsed.model, apiKey: "must-not-cross-the-protocol" },
 			}),
 		/apiKey/,
+	);
+	assert.throws(
+		() =>
+			parseRequest({
+				...parsed,
+				builtinTools: ["write"],
+			}),
+		/unknown builtin tool/i,
 	);
 });
 

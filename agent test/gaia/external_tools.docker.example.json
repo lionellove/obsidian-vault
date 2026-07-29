@@ -1,0 +1,22 @@
+{
+  "docker_mcp": {
+    "profile": "gaia",
+    "connect_timeout_seconds": 180
+  },
+  "tool_allowlist": [
+    "fetch",
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_fill_form",
+    "browser_select_option",
+    "browser_press_key",
+    "browser_wait_for",
+    "browser_tabs",
+    "get_current_time",
+    "convert_time"
+  ],
+  "max_tools": 12,
+  "pi_builtin_tools": []
+}
