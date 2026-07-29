@@ -1,0 +1,4 @@
+interface:
+  display_name: "GAIA R12 Trench Volume"
+  short_description: "Solve the target trench-volume task safely"
+  default_prompt: "Use $solve-gaia-r12-trench-volume to solve the target GAIA task without leaking its reference answer."

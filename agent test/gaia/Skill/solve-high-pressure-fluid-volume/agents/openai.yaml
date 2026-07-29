@@ -1,0 +1,4 @@
+interface:
+  display_name: "High-Pressure Fluid Volume"
+  short_description: "Research and compute compressed-fluid volume"
+  default_prompt: "Use $solve-high-pressure-fluid-volume to solve a high-pressure fluid-volume research question."
