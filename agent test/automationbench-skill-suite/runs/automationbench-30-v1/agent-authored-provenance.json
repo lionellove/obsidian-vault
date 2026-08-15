@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "arm": "agent-authored-skill",
+  "authorship": "clean-room Codex subagents",
+  "authored_on": "2026-08-16",
+  "task_count": 30,
+  "allowed_inputs": [
+    "task_request",
+    "available_tools",
+    "initial_state",
+    "prompts/generate_anthropic_skill.md"
+  ],
+  "excluded_inputs": [
+    "assertions",
+    "existing generated skills",
+    "generation records and raw model output",
+    "instruction maps",
+    "evaluation results",
+    "scores"
+  ],
+  "external_skill_generator_used": false,
+  "authoring_batches": [
+    {
+      "domains": ["sales", "marketing"],
+      "task_count": 10
+    },
+    {
+      "domains": ["operations", "support"],
+      "task_count": 10
+    },
+    {
+      "domains": ["finance", "hr"],
+      "task_count": 10
+    }
+  ],
+  "validation": {
+    "validator": "automationbench_pipeline.validate_skill_markdown",
+    "validated": 30,
+    "failed": 0,
+    "manifest_coverage": "30/30"
+  }
+}
