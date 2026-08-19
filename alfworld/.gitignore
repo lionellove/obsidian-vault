@@ -3,3 +3,4 @@
 __pycache__/
 *.py[cod]
 results/
+.alfworld_data/
