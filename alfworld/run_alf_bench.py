@@ -73,19 +73,28 @@ Action selection:
 - Copy the selected action EXACTLY as it appears in that list.
 - Do not translate, paraphrase, shorten, renumber, or invent an action.
     - Do not output an action index.
-    - You may provide a short analysis before the final action.
 
 Final-action validation:
 - The final action must be copied character-for-character from the current admissible-action list.
 - Never create a plausible action that is absent from that list.
 - If your preferred action is absent, choose a useful action that is present.
 
-At the end of the response, output exactly one line in this format:
+Strict response protocol:
+- Return exactly ONE physical line and nothing else.
+- The line must start with `FINAL_ACTION: ` and then contain one complete action copied character-for-character from the current admissible-action list.
+- Do not output analysis, explanations, reasoning, Markdown, quotes, bullets, action numbers, multiple candidates, or any text before or after that line.
+"""
 
-FINAL_ACTION: <exact admissible action>
 
-Do not use Markdown formatting around the final action.
-Do not write anything after the FINAL_ACTION line.
+STRICT_ACTION_FORMAT = """Strict output requirement (highest priority):
+Return exactly one physical line and nothing else:
+FINAL_ACTION: <copy one complete admissible action exactly>
+
+The text after `FINAL_ACTION: ` must be character-for-character identical to one
+entry in the current admissible-action list. Do not include analysis, reasoning,
+Markdown, quotes, bullets, numbering, alternative actions, or any text before or
+after that one line. If your preferred action is unavailable, choose a useful
+listed action instead.
 """
 
 
@@ -189,7 +198,8 @@ Current observations and admissible actions remain authoritative.
 
 """
 
-    return f"""{skill_section}Task:
+    return f"""{skill_section}{STRICT_ACTION_FORMAT}
+Task:
 {task}
 
 Previous interaction:
@@ -201,20 +211,16 @@ Current observation:
 Currently admissible actions:
 {actions_text}
 
-Choose exactly one action from the list above and copy it exactly.
-Validity check: the text after FINAL_ACTION: must equal one complete line from
-the admissible-action list above. Do not output an action number or an action
-that is not listed.
-End your response with:
-FINAL_ACTION: <exact admissible action>
+Return exactly the one-line format above. The text after FINAL_ACTION: must equal
+one complete line from the admissible-action list above.
 """
 
 
 def build_repair_prompt(task, current_observation, admissible_actions):
     actions_text = "\n".join(f"- {action}" for action in admissible_actions)
-    return f"""Your previous response did not contain a valid current action.
-Return only one final line, copied character-for-character from this list.
-Never output an action number and never invent an action.
+    return f"""Your previous response did not follow the strict output protocol.
+Return exactly one physical line, copied character-for-character from this list.
+Do not output an action number, explanation, Markdown, or any other text.
 
 Task: {task}
 Current observation: {current_observation}

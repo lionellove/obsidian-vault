@@ -1,0 +1,8 @@
+{
+  "source": "configs/fixed_task_ids.json",
+  "purpose": "One-task smoke test for compiled teacher skill injection",
+  "task_ids": [
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_and_place_simple-Vase-None-Safe-219/trial_T20190908_205221_748352/game.tw-pddl"
+  ],
+  "count": 1
+}

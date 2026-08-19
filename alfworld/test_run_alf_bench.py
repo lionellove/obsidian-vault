@@ -58,6 +58,13 @@ class RunAlfBenchTests(unittest.TestCase):
         self.assertIn("Reusable procedural guidance:", prompt)
         self.assertIn("Do prerequisites first.", prompt)
         self.assertIn("Currently admissible actions:", prompt)
+        self.assertIn("Return exactly one physical line", prompt)
+        self.assertIn("Do not include analysis", prompt)
+
+    def test_repair_prompt_requires_single_strict_action_line(self):
+        prompt = bench.build_repair_prompt("clean mug", "at sink", ["clean mug 1 with sinkbasin 1"])
+        self.assertIn("exactly one physical line", prompt)
+        self.assertIn("Do not output an action number, explanation", prompt)
 
     def test_load_env_file_preserves_existing_environment(self):
         with tempfile.TemporaryDirectory() as temp_dir:

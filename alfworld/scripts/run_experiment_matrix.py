@@ -15,7 +15,7 @@ from experiment_common import ROOT, write_json
 SKILL_FOR_CONDITION = {
     "student_baseline": None,
     "student_self_skill": "skills/student_self_skill.md",
-    "student_teacher_skill": "skills/teacher_skill.md",
+    "student_teacher_skill": "skills/teacher_skill_compiled.md",
     "student_irrelevant_skill": "skills/irrelevant_skill.md",
     "student_shuffled_skill": "skills/shuffled_teacher_skill.md",
 }
@@ -39,7 +39,11 @@ def run_condition(condition: str, model: str, task_file: Path, output_root: Path
         env["SKILL_FILE"] = str(ROOT / skill)
     else:
         env.pop("SKILL_FILE", None)
-    command = [sys.executable, str(ROOT / "run_alf_bench.py")]
+    command = [
+        sys.executable,
+        str(ROOT / "run_alf_bench.py"),
+        str(ROOT / "alfworld/configs/base_config.yaml"),
+    ]
     completed = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True)
     log_path = output_root / "logs" / f"{condition}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
