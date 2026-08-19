@@ -71,8 +71,13 @@ Action selection:
 - Choose exactly ONE action from the current admissible-action list.
 - Copy the selected action EXACTLY as it appears in that list.
 - Do not translate, paraphrase, shorten, renumber, or invent an action.
-- Do not output an action index.
-- You may provide a short analysis before the final action.
+    - Do not output an action index.
+    - You may provide a short analysis before the final action.
+
+Final-action validation:
+- The final action must be copied character-for-character from the current admissible-action list.
+- Never create a plausible action that is absent from that list.
+- If your preferred action is absent, choose a useful action that is present.
 
 At the end of the response, output exactly one line in this format:
 
@@ -196,9 +201,26 @@ Currently admissible actions:
 {actions_text}
 
 Choose exactly one action from the list above and copy it exactly.
+Validity check: the text after FINAL_ACTION: must equal one complete line from
+the admissible-action list above. Do not output an action number or an action
+that is not listed.
 End your response with:
 FINAL_ACTION: <exact admissible action>
 """
+
+
+def build_repair_prompt(task, current_observation, admissible_actions):
+    actions_text = "\n".join(f"- {action}" for action in admissible_actions)
+    return f"""Your previous response did not contain a valid current action.
+Return only one final line, copied character-for-character from this list.
+Never output an action number and never invent an action.
+
+Task: {task}
+Current observation: {current_observation}
+Currently admissible actions:
+{actions_text}
+
+FINAL_ACTION: <copy exactly one listed action>"""
 
 
 def parse_action(text, admissible_actions):
@@ -286,6 +308,9 @@ class ModelClient:
             self.ollama_num_predict = int(
                 os.environ.get("OLLAMA_NUM_PREDICT", "512")
             )
+            self.ollama_temperature = float(
+                os.environ.get("OLLAMA_TEMPERATURE", "0")
+            )
             self.ollama_think = os.environ.get("OLLAMA_THINK", "false").lower() in {
                 "1", "true", "yes", "on"
             }
@@ -354,6 +379,7 @@ class ModelClient:
             "options": {
                 "num_ctx": self.ollama_num_ctx,
                 "num_predict": self.ollama_num_predict,
+                "temperature": self.ollama_temperature,
             },
             "think": self.ollama_think,
         }
@@ -477,6 +503,19 @@ def run_episode(env, episode_index, model_name, max_steps=MAX_STEPS):
         # Execute the semantic action selected by the model.
         # Do not use an integer -> action mapping for control.
         action = parse_action(raw_output, admissible_actions)
+        format_repair = False
+        repair_output = None
+        repair_usage = None
+
+        if action is None:
+            repair_started = time.time()
+            repair_output = call_model(
+                build_repair_prompt(task, current_obs, admissible_actions)
+            )
+            model_call_seconds += time.time() - repair_started
+            repair_usage = dict(_MODEL_CLIENT.last_usage)
+            action = parse_action(repair_output, admissible_actions)
+            format_repair = action is not None
 
         if action is None:
             trajectory.append({
@@ -485,6 +524,7 @@ def run_episode(env, episode_index, model_name, max_steps=MAX_STEPS):
                 "admissible_actions": admissible_actions,
                 "thinking": thinking,
                 "model_output": raw_output,
+                "repair_output": repair_output,
                 "action": None,
                 "action_index": None,
                 "next_observation": None,
@@ -493,6 +533,7 @@ def run_episode(env, episode_index, model_name, max_steps=MAX_STEPS):
                 "format_error": True,
                 "model_call_seconds": model_call_seconds,
                 "model_usage": usage,
+                "repair_usage": repair_usage,
             })
             termination = "invalid_model_output"
             break
@@ -511,6 +552,7 @@ def run_episode(env, episode_index, model_name, max_steps=MAX_STEPS):
             "admissible_actions": admissible_actions,
             "thinking": thinking,
             "model_output": raw_output,
+            "repair_output": repair_output,
             "action_index": action_index,
             "action": action,
             "next_observation": next_obs[0],
@@ -518,8 +560,10 @@ def run_episode(env, episode_index, model_name, max_steps=MAX_STEPS):
             "done": done,
             "won": won,
             "format_error": False,
+            "format_repair": format_repair,
             "model_call_seconds": model_call_seconds,
             "model_usage": usage,
+            "repair_usage": repair_usage,
         })
 
         current_obs = next_obs[0]

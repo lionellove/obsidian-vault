@@ -82,6 +82,7 @@ class RunAlfBenchTests(unittest.TestCase):
         self.assertFalse(payload["think"])
         self.assertEqual(payload["options"]["num_ctx"], 16384)
         self.assertEqual(payload["options"]["num_predict"], 512)
+        self.assertEqual(payload["options"]["temperature"], 0)
 
     def test_select_fixed_game_files_matches_cross_platform_suffix(self):
         selected = bench._select_fixed_game_files(
