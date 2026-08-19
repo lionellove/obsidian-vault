@@ -13,23 +13,73 @@ from urllib import error, request
 import numpy as np
 
 
+ALFWORLD_SOURCE = Path(__file__).with_name("alfworld")
+if str(ALFWORLD_SOURCE) not in sys.path:
+    sys.path.insert(0, str(ALFWORLD_SOURCE))
+
+
 MAX_STEPS = 50
 OUTPUT_DIR = Path("results")
 ENV_FILE = Path(__file__).with_name(".env")
 
 
-SYSTEM_PROMPT = """You are an agent solving an ALFWorld task.
+SYSTEM_PROMPT = """You are an agent acting in an interactive household environment.
 
-At each step you will receive:
-- the task and initial observation
-- previous actions and observations
-- the current observation
-- a numbered list of admissible actions
+Your goal is to complete the given task by interacting with the environment one action at a time.
 
-Choose the single best next action.
+At each step, you will receive:
+- the task goal,
+- previous actions and observations,
+- the current observation,
+- a list of currently admissible actions.
 
-Return ONLY the integer index of the chosen action.
-Do not explain your answer.
+Decision procedure:
+1. Identify the final task goal.
+2. Identify the immediate subgoal that should be achieved next.
+3. Recall relevant facts already established by previous observations and actions.
+4. Determine what information or state change is still required.
+5. Consider only the currently admissible actions.
+6. Select the action that most directly advances the immediate subgoal, or obtains necessary information when the correct next action cannot yet be determined.
+7. Commit to one action.
+
+Environment rules:
+- The environment is sequential and partially observable.
+- The currently admissible actions are the only actions that may be executed at this step.
+- The admissible-action set may change after navigation or interaction.
+- An action unavailable now may become available after the environment state changes.
+- Do not invent actions that are not currently admissible.
+- Do not conclude that the task is impossible merely because a future action is currently unavailable.
+- Do not speculate about hidden environment implementation details, benchmark mechanics, or dataset behavior.
+- Do not repeatedly reconsider the same alternatives without new evidence.
+- Do not repeatedly visit or inspect locations already shown to be irrelevant unless the environment state has changed.
+- Do not assume an object's location or state without observational evidence.
+
+Exploration:
+- When the location of a required object is unknown, search systematically.
+- Remember which locations have already been inspected and what was observed there.
+- Prefer unexplored plausible locations over revisiting locations already shown not to contain the required object.
+- Do not rely only on household stereotypes; treat environment observations as authoritative.
+
+Object manipulation:
+- Reason in terms of prerequisites and state transitions.
+- A task may require locating, acquiring, preparing, transporting, and placing objects.
+- Do not assume every task requires every operation.
+- If the task explicitly requires an object to be clean, heated, cooled, or otherwise transformed, do not assume the requirement is satisfied merely because the object appears normal or empty.
+- Ensure the required state change has actually occurred before final placement.
+
+Action selection:
+- Choose exactly ONE action from the current admissible-action list.
+- Copy the selected action EXACTLY as it appears in that list.
+- Do not translate, paraphrase, shorten, renumber, or invent an action.
+- Do not output an action index.
+- You may provide a short analysis before the final action.
+
+At the end of the response, output exactly one line in this format:
+
+FINAL_ACTION: <exact admissible action>
+
+Do not use Markdown formatting around the final action.
+Do not write anything after the FINAL_ACTION line.
 """
 
 
@@ -92,9 +142,24 @@ def infer_task_type(gamefile):
     return "unknown"
 
 
-def build_prompt(task, current_observation, admissible_actions, trajectory):
+def _load_skill():
+    skill_file = os.environ.get("SKILL_FILE", "").strip()
+    if not skill_file:
+        return ""
+    path = Path(skill_file)
+    if not path.is_absolute():
+        path = Path(__file__).parent / path
+    if not path.exists():
+        raise FileNotFoundError(f"SKILL_FILE does not exist: {path}")
+    return path.read_text(encoding="utf-8").strip()
+
+
+def build_prompt(task, current_observation, admissible_actions, trajectory,
+                 skill=""):
     history_lines = []
     for item in trajectory:
+        if not item.get("action"):
+            continue
         history_lines.append(
             f"Step {item['step']}:\n"
             f"Action: {item['action']}\n"
@@ -102,10 +167,23 @@ def build_prompt(task, current_observation, admissible_actions, trajectory):
         )
 
     history = "\n\n".join(history_lines)
-    actions_text = "\n".join(
-        f"{i}. {action}" for i, action in enumerate(admissible_actions)
-    )
-    return f"""Task:
+
+    # Do not number actions: small models can choose the right semantic action
+    # but map it to the wrong integer index.
+    actions_text = "\n".join(f"- {action}" for action in admissible_actions)
+
+    skill_section = ""
+    if skill.strip():
+        skill_section = f"""Reusable procedural guidance:
+
+{skill.strip()}
+
+Use this guidance when relevant. Do not treat it as task-specific ground truth.
+Current observations and admissible actions remain authoritative.
+
+"""
+
+    return f"""{skill_section}Task:
 {task}
 
 Previous interaction:
@@ -114,25 +192,38 @@ Previous interaction:
 Current observation:
 {current_observation}
 
-Admissible actions:
+Currently admissible actions:
 {actions_text}
 
-Return only the integer action index.
+Choose exactly one action from the list above and copy it exactly.
+End your response with:
+FINAL_ACTION: <exact admissible action>
 """
 
 
-def parse_action_index(text, num_actions):
+def parse_action(text, admissible_actions):
+    """Return an exact currently-admissible action string, or None."""
     if not isinstance(text, str):
         return None
 
-    text = text.strip()
-    fenced = re.fullmatch(r"```(?:text)?\s*(\d+)\s*```", text, re.IGNORECASE)
-    match = fenced or re.fullmatch(r"(\d+)", text)
+    match = re.search(
+        r"FINAL_ACTION:\s*(.+?)\s*$",
+        text.strip(),
+        re.IGNORECASE,
+    )
     if not match:
         return None
 
-    index = int(match.group(1))
-    return index if 0 <= index < num_actions else None
+    action = match.group(1).strip()
+
+    # Tolerate accidental Markdown wrappers, but still require exact
+    # membership in the current action set.
+    if len(action) >= 4 and action.startswith("**") and action.endswith("**"):
+        action = action[2:-2].strip()
+    if len(action) >= 2 and action.startswith("`") and action.endswith("`"):
+        action = action[1:-1].strip()
+
+    return action if action in admissible_actions else None
 
 
 def _join_api_path(base_url, endpoint):
@@ -151,107 +242,171 @@ def _required_env(name):
 
 class ModelClient:
     def __init__(self, provider=None):
-        configured_provider = provider or os.environ.get("MODEL_PROVIDER", "auto")
-        configured_provider = configured_provider.strip().lower()
+        configured_provider = (
+            provider or os.environ.get("MODEL_PROVIDER", "auto")
+        ).strip().lower()
+
         if configured_provider == "auto":
-            both_configured = all(
-                os.environ.get(name)
-                for name in (
-                    "OPENAI_API_KEY",
-                    "OPENAI_BASE_URL",
-                    "MODEL_ID",
-                    "ANTHROPIC_API_KEY",
-                    "ANTHROPIC_BASE_URL",
-                    "ANTHROPIC_MODEL",
+            if os.environ.get("OLLAMA_MODEL"):
+                configured_provider = "ollama"
+            elif os.environ.get("OPENAI_API_KEY"):
+                configured_provider = "openai"
+            else:
+                raise ValueError(
+                    "Could not infer provider. Set MODEL_PROVIDER=openai "
+                    "or MODEL_PROVIDER=ollama."
                 )
-            )
-            configured_provider = (
-                "openai" if os.environ.get("OPENAI_API_KEY") else "anthropic"
-            )
-            if both_configured:
-                print(
-                    "Both model providers are configured; defaulting to openai. "
-                    "Set MODEL_PROVIDER=anthropic to use the Anthropic config.",
-                    file=sys.stderr,
-                )
-        if configured_provider not in {"openai", "anthropic"}:
-            raise ValueError("MODEL_PROVIDER must be openai, anthropic, or auto")
+
+        if configured_provider not in {"openai", "ollama"}:
+            raise ValueError("MODEL_PROVIDER must be openai, ollama, or auto")
 
         self.provider = configured_provider
         self.timeout = float(os.environ.get("MODEL_TIMEOUT_SECONDS", "120"))
         self.max_retries = int(os.environ.get("MODEL_MAX_RETRIES", "3"))
+        self.last_thinking = ""
+        self.last_usage = {}
+
         if self.provider == "openai":
             self.api_key = _required_env("OPENAI_API_KEY")
             self.base_url = _required_env("OPENAI_BASE_URL")
             self.model = _required_env("MODEL_ID")
         else:
-            self.api_key = _required_env("ANTHROPIC_API_KEY")
-            self.base_url = _required_env("ANTHROPIC_BASE_URL")
-            self.model = _required_env("ANTHROPIC_MODEL")
+            self.api_key = None
+            self.base_url = os.environ.get(
+                "OLLAMA_BASE_URL", "http://localhost:11434"
+            ).rstrip("/")
+            self.model = os.environ.get(
+                "OLLAMA_MODEL", "ministral-3:3b"
+            ).strip()
+            if not self.model:
+                raise ValueError("OLLAMA_MODEL must not be empty")
 
-    def complete(self, prompt):
+            self.ollama_keep_alive = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
+            self.ollama_num_ctx = int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
+            self.ollama_num_predict = int(
+                os.environ.get("OLLAMA_NUM_PREDICT", "512")
+            )
+            self.ollama_think = os.environ.get("OLLAMA_THINK", "false").lower() in {
+                "1", "true", "yes", "on"
+            }
+
+    def complete(self, prompt, system_prompt=None):
+        self.last_thinking = ""
+        self.last_usage = {}
+
         if self.provider == "openai":
-            url = _join_api_path(self.base_url, "/chat/completions")
-            headers = {"Authorization": f"Bearer {self.api_key}"}
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0,
-                "max_tokens": 16,
-            }
-        else:
-            url = _join_api_path(self.base_url, "/messages")
-            headers = {
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01",
-            }
-            payload = {
-                "model": self.model,
-                "system": SYSTEM_PROMPT,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0,
-                "max_tokens": 16,
-            }
+            return self._complete_openai(prompt, system_prompt or SYSTEM_PROMPT)
+        return self._complete_ollama(prompt, system_prompt or SYSTEM_PROMPT)
+
+    def _complete_openai(self, prompt, system_prompt):
+        url = _join_api_path(self.base_url, "/chat/completions")
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+        }
 
         response = self._post_json(url, headers, payload)
+
         try:
-            if self.provider == "openai":
-                content = response["choices"][0]["message"]["content"]
-                if isinstance(content, list):
-                    content = "".join(
-                        part.get("text", "")
-                        for part in content
-                        if isinstance(part, dict)
-                    )
-            else:
+            message = response["choices"][0]["message"]
+            content = message["content"]
+
+            if isinstance(content, list):
                 content = "".join(
-                    block.get("text", "")
-                    for block in response["content"]
-                    if block.get("type") == "text"
+                    part.get("text", "")
+                    for part in content
+                    if isinstance(part, dict)
                 )
+
+            usage = response.get("usage", {})
+            if isinstance(usage, dict):
+                self.last_usage = {
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                }
+
         except (AttributeError, IndexError, KeyError, TypeError) as exc:
             raise ModelAPIError(
-                f"Malformed {self.provider} API response"
+                "Malformed OpenAI-compatible API response"
             ) from exc
 
         if not isinstance(content, str) or not content.strip():
-            raise ModelAPIError(f"Empty {self.provider} API response")
-        return content
+            raise ModelAPIError("Empty OpenAI-compatible API response")
+
+        return content.strip()
+
+    def _complete_ollama(self, prompt, system_prompt):
+        url = f"{self.base_url}/api/chat"
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+            "keep_alive": self.ollama_keep_alive,
+            "options": {
+                "num_ctx": self.ollama_num_ctx,
+                "num_predict": self.ollama_num_predict,
+            },
+            "think": self.ollama_think,
+        }
+
+        response = self._post_json(url, {}, payload)
+
+        try:
+            message = response["message"]
+            content = message.get("content", "")
+            thinking = message.get("thinking", "")
+            self.last_thinking = thinking if isinstance(thinking, str) else ""
+
+            self.last_usage = {
+                "done": response.get("done"),
+                "done_reason": response.get("done_reason"),
+                "prompt_eval_count": response.get("prompt_eval_count"),
+                "eval_count": response.get("eval_count"),
+                "prompt_eval_duration_ns": response.get("prompt_eval_duration"),
+                "eval_duration_ns": response.get("eval_duration"),
+                "load_duration_ns": response.get("load_duration"),
+                "total_duration_ns": response.get("total_duration"),
+            }
+
+        except (AttributeError, KeyError, TypeError) as exc:
+            raise ModelAPIError("Malformed Ollama API response") from exc
+
+        if not isinstance(content, str) or not content.strip():
+            raise ModelAPIError(
+                "Ollama returned empty final content. "
+                f"done_reason={response.get('done_reason')!r}, "
+                f"eval_count={response.get('eval_count')!r}, "
+                f"thinking_chars={len(self.last_thinking)}"
+            )
+
+        return content.strip()
 
     def _post_json(self, url, extra_headers, payload):
         headers = {"Content-Type": "application/json", **extra_headers}
         body = json.dumps(payload).encode("utf-8")
+
         for attempt in range(self.max_retries + 1):
             try:
-                api_request = request.Request(url, data=body, headers=headers, method="POST")
+                api_request = request.Request(
+                    url, data=body, headers=headers, method="POST"
+                )
                 with request.urlopen(api_request, timeout=self.timeout) as response:
                     try:
                         return json.loads(response.read().decode("utf-8"))
                     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                        raise ModelAPIError("Model API returned invalid JSON") from exc
+                        raise ModelAPIError(
+                            "Model API returned invalid JSON"
+                        ) from exc
+
             except error.HTTPError as exc:
                 details = exc.read().decode("utf-8", errors="replace")[:1000]
                 retryable = exc.code == 429 or 500 <= exc.code < 600
@@ -259,14 +414,19 @@ class ModelClient:
                     raise ModelAPIError(
                         f"Model API returned HTTP {exc.code}: {details}"
                     ) from exc
+
             except (error.URLError, TimeoutError) as exc:
                 if attempt == self.max_retries:
-                    raise ModelAPIError(f"Model API request failed: {exc}") from exc
+                    raise ModelAPIError(
+                        f"Model API request failed: {exc}"
+                    ) from exc
+
             time.sleep(min(2**attempt, 8))
 
 
 class ModelAPIError(RuntimeError):
     """A model request failed after retrying and the benchmark should stop."""
+
 
 
 _MODEL_CLIENT = None
@@ -287,8 +447,12 @@ def run_episode(env, episode_index, model_name, max_steps=MAX_STEPS):
     initial_obs = current_obs
     task = extract_task(initial_obs)
     gamefile = first_value(info, "extra.gamefile", default=None)
-    task_id = gamefile or hashlib.sha1(initial_obs.encode("utf-8")).hexdigest()[:16]
+    task_id = gamefile or hashlib.sha1(
+        initial_obs.encode("utf-8")
+    ).hexdigest()[:16]
+
     trajectory = []
+    skill = _load_skill()
     success = False
     termination = "max_steps"
     start_time = time.time()
@@ -299,14 +463,27 @@ def run_episode(env, episode_index, model_name, max_steps=MAX_STEPS):
             termination = "no_admissible_actions"
             break
 
-        prompt = build_prompt(task, current_obs, admissible_actions, trajectory)
+        prompt = build_prompt(
+            task, current_obs, admissible_actions, trajectory, skill
+        )
+
+        model_call_start = time.time()
         raw_output = call_model(prompt)
-        action_index = parse_action_index(raw_output, len(admissible_actions))
-        if action_index is None:
+        model_call_seconds = time.time() - model_call_start
+
+        thinking = _MODEL_CLIENT.last_thinking
+        usage = dict(_MODEL_CLIENT.last_usage)
+
+        # Execute the semantic action selected by the model.
+        # Do not use an integer -> action mapping for control.
+        action = parse_action(raw_output, admissible_actions)
+
+        if action is None:
             trajectory.append({
                 "step": step,
                 "observation": current_obs,
                 "admissible_actions": admissible_actions,
+                "thinking": thinking,
                 "model_output": raw_output,
                 "action": None,
                 "action_index": None,
@@ -314,20 +491,25 @@ def run_episode(env, episode_index, model_name, max_steps=MAX_STEPS):
                 "reward": 0,
                 "done": False,
                 "format_error": True,
+                "model_call_seconds": model_call_seconds,
+                "model_usage": usage,
             })
             termination = "invalid_model_output"
             break
 
-        action = admissible_actions[action_index]
+        # Keep index only as metadata for analysis.
+        action_index = admissible_actions.index(action)
+
         next_obs, rewards, dones, next_info = env.step([action])
-        # AlfredTWEnv returns rewards, while AlfredThorEnv returns None here.
         reward = None if rewards is None else float(rewards[0])
         done = bool(dones[0])
         won = bool(first_value(next_info, "won", False))
+
         trajectory.append({
             "step": step,
             "observation": current_obs,
             "admissible_actions": admissible_actions,
+            "thinking": thinking,
             "model_output": raw_output,
             "action_index": action_index,
             "action": action,
@@ -336,7 +518,10 @@ def run_episode(env, episode_index, model_name, max_steps=MAX_STEPS):
             "done": done,
             "won": won,
             "format_error": False,
+            "model_call_seconds": model_call_seconds,
+            "model_usage": usage,
         })
+
         current_obs = next_obs[0]
         info = next_info
 
@@ -355,6 +540,8 @@ def run_episode(env, episode_index, model_name, max_steps=MAX_STEPS):
         "task_type": infer_task_type(gamefile),
         "task": task,
         "model": model_name,
+        "condition": os.environ.get("CONDITION", "student_baseline"),
+        "skill_file": os.environ.get("SKILL_FILE", "") or None,
         "success": success,
         "steps": len(trajectory),
         "termination": termination,
@@ -399,8 +586,66 @@ def _write_results(output_path, results):
         temporary_path.unlink(missing_ok=True)
 
 
+def _task_match_key(value):
+    """Normalize task paths so results from another machine can be reused."""
+    value = str(value or "").replace("\\", "/").rstrip("/")
+    return value.lower()
+
+
+def _select_fixed_game_files(game_files, task_ids_path):
+    if not task_ids_path:
+        return list(game_files)
+
+    path = Path(task_ids_path)
+    if not path.is_absolute():
+        path = Path(__file__).parent / path
+    task_ids = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(task_ids, dict):
+        task_ids = task_ids.get("task_ids", [])
+    if not isinstance(task_ids, list) or not task_ids:
+        raise ValueError(f"Task ID file must contain a non-empty list: {path}")
+
+    available = {_task_match_key(item): item for item in game_files}
+    selected = []
+    missing = []
+    for task_id in task_ids:
+        wanted = _task_match_key(task_id)
+        exact = available.get(wanted)
+        if exact:
+            selected.append(exact)
+            continue
+        wanted_parts = wanted.split("/")
+        suffix_matches = [
+            item for key, item in available.items()
+            if key.endswith(wanted)
+            or wanted.endswith(key)
+            or (len(wanted_parts) >= 2 and key.split("/")[-2:] == wanted_parts[-2:])
+        ]
+        if len(suffix_matches) != 1:
+            missing.append(task_id)
+        else:
+            selected.append(suffix_matches[0])
+    if missing:
+        raise RuntimeError(
+            f"Could not uniquely match {len(missing)} fixed task IDs from {path}: {missing[:3]}"
+        )
+    if len(set(selected)) != len(selected):
+        raise RuntimeError(f"Fixed task ID file contains duplicate or ambiguous tasks: {path}")
+    return selected
+
+
 def main():
     load_env_file()
+
+    configured_data = os.environ.get("ALFWORLD_DATA", "").strip()
+    if not configured_data:
+        bundled_data = Path(__file__).parent / "alfworld" / "alfworld" / "data"
+        if not (bundled_data / "json_2.1.1").exists():
+            raise RuntimeError(
+                "ALFWORLD_DATA is not configured and no downloaded ALFWorld dataset "
+                "was found. Set ALFWORLD_DATA to the directory containing "
+                "json_2.1.1, logic, and (for TextWorld) generated game files."
+            )
 
     # Importing alfworld.info establishes its default ALFWORLD_DATA path when the
     # user did not explicitly configure one.
@@ -437,6 +682,13 @@ def main():
         config,
         train_eval=eval_split,
     )
+    fixed_task_file = os.environ.get("TASK_IDS_FILE", "").strip()
+    if fixed_task_file:
+        env_factory.game_files = _select_fixed_game_files(
+            env_factory.game_files, fixed_task_file
+        )
+        env_factory.num_games = len(env_factory.game_files)
+        print(f"Fixed task set: {env_factory.num_games} games")
     num_games = env_factory.num_games
     if num_games == 0:
         raise RuntimeError(
@@ -488,6 +740,7 @@ def main():
             print("Task:", result.get("task"))
             print("Success:", result.get("success"))
             print("Steps:", result.get("steps"))
+            print("Termination:", result.get("termination"))
             if result.get("error"):
                 print("Error:", result["error"], file=sys.stderr)
 

@@ -1,0 +1,21 @@
+{
+  "task_ids_file": "configs/fixed_task_ids.json",
+  "teacher_result": "",
+  "pilot_models": [
+    "qwen3:4b-instruct",
+    "ministral-3:3b",
+    "gemma3:4b",
+    "phi4-mini"
+  ],
+  "pilot_tasks": 10,
+  "max_steps": 50,
+  "ollama_num_ctx": 16384,
+  "ollama_num_predict": 512,
+  "conditions": [
+    "student_baseline",
+    "student_self_skill",
+    "student_teacher_skill",
+    "student_irrelevant_skill",
+    "student_shuffled_skill"
+  ]
+}

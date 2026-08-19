@@ -1,0 +1,16 @@
+{
+  "source_teacher_result": "D:\\个人仓库\\alfworld\\results\\openai_deepseek-v4-flash_AlfredTWEnv_unseen_20260818T140709581912Z_7613ac41.json",
+  "task_ids": [
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_and_place_simple-Vase-None-Safe-219/trial_T20190908_205221_748352/game.tw-pddl",
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_221355_558505/game.tw-pddl",
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_and_place_simple-Vase-None-Safe-219/trial_T20190908_205246_776817/game.tw-pddl",
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_221208_560499/game.tw-pddl",
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_221300_362511/game.tw-pddl",
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_and_place_simple-Vase-None-Safe-219/trial_T20190908_205204_244321/game.tw-pddl",
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_114545_244903/game.tw-pddl",
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_114622_738670/game.tw-pddl",
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_114656_768805/game.tw-pddl",
+    "/home/lionel/.cache/alfworld/json_2.1.1/valid_unseen/pick_two_obj_and_place-ToiletPaper-None-Cabinet-424/trial_T20190906_202926_527010/game.tw-pddl"
+  ],
+  "count": 10
+}
