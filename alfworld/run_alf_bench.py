@@ -239,21 +239,28 @@ def parse_action(text, admissible_actions):
         text,
         re.IGNORECASE,
     ))
-    if not matches:
-        return None
+    candidates = []
+    if matches:
+        # Use the last marked action, which is normally the final line after
+        # any analysis. Only the first physical line after the marker counts.
+        candidates.append(matches[-1].group(1).splitlines()[0].strip())
+    else:
+        # Some otherwise compliant models return the requested action as a
+        # bare final line. Accept only that final line, never an arbitrary
+        # substring from the reasoning text.
+        final_line = [line.strip() for line in text.splitlines() if line.strip()]
+        if final_line:
+            candidates.append(final_line[-1])
 
-    # Use the last marked action, which is normally the final line after any
-    # analysis. Only the first physical line after the marker is considered.
-    action = matches[-1].group(1).splitlines()[0].strip()
-    action = _normalize_action_text(action)
-
-    normalized_matches = [
-        candidate
-        for candidate in admissible_actions
-        if _normalize_action_text(candidate).casefold() == action.casefold()
-    ]
-    if len(normalized_matches) == 1:
-        return normalized_matches[0]
+    for candidate in candidates:
+        action = _normalize_action_text(candidate)
+        normalized_matches = [
+            listed_action
+            for listed_action in admissible_actions
+            if _normalize_action_text(listed_action).casefold() == action.casefold()
+        ]
+        if len(normalized_matches) == 1:
+            return normalized_matches[0]
     return None
 
 
