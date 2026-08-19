@@ -45,7 +45,10 @@ class RunAlfBenchTests(unittest.TestCase):
         actions = ["inventory", "take mug 3 from countertop 2"]
         self.assertEqual(bench.parse_action("FINAL_ACTION: inventory", actions), "inventory")
         self.assertEqual(bench.parse_action("FINAL_ACTION: **inventory**", actions), "inventory")
+        self.assertEqual(bench.parse_action("FINAL ACTION： ` INVENTORY `。", actions), "inventory")
+        self.assertEqual(bench.parse_action("analysis\nAction: - take mug 3 from countertop 2\n", actions), "take mug 3 from countertop 2")
         self.assertIsNone(bench.parse_action("FINAL_ACTION: take mug 3", actions))
+        self.assertIsNone(bench.parse_action("FINAL_ACTION: 2", actions))
         self.assertIsNone(bench.parse_action("inventory", actions))
 
     def test_build_prompt_injects_skill_as_separate_section(self):

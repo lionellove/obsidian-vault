@@ -6,6 +6,7 @@ import re
 import sys
 import time
 import uuid
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, request
@@ -224,28 +225,46 @@ FINAL_ACTION: <copy exactly one listed action>"""
 
 
 def parse_action(text, admissible_actions):
-    """Return an exact currently-admissible action string, or None."""
+    """Return a canonical admissible action while tolerating harmless formatting.
+
+    Normalization is deliberately limited to presentation noise. The returned
+    value is always the original string from ``admissible_actions``; no action
+    index, synonym, partial action, or invented action is accepted.
+    """
     if not isinstance(text, str):
         return None
 
-    match = re.search(
-        r"FINAL_ACTION:\s*(.+?)\s*$",
-        text.strip(),
+    matches = list(re.finditer(
+        r"(?:FINAL[_ ]ACTION|FINAL[_ ]ANSWER|ACTION)\s*[:：]\s*(.*)",
+        text,
         re.IGNORECASE,
-    )
-    if not match:
+    ))
+    if not matches:
         return None
 
-    action = match.group(1).strip()
+    # Use the last marked action, which is normally the final line after any
+    # analysis. Only the first physical line after the marker is considered.
+    action = matches[-1].group(1).splitlines()[0].strip()
+    action = _normalize_action_text(action)
 
-    # Tolerate accidental Markdown wrappers, but still require exact
-    # membership in the current action set.
-    if len(action) >= 4 and action.startswith("**") and action.endswith("**"):
-        action = action[2:-2].strip()
-    if len(action) >= 2 and action.startswith("`") and action.endswith("`"):
-        action = action[1:-1].strip()
+    normalized_matches = [
+        candidate
+        for candidate in admissible_actions
+        if _normalize_action_text(candidate).casefold() == action.casefold()
+    ]
+    if len(normalized_matches) == 1:
+        return normalized_matches[0]
+    return None
 
-    return action if action in admissible_actions else None
+
+def _normalize_action_text(value):
+    value = unicodedata.normalize("NFKC", str(value)).strip()
+    value = re.sub(r"^(?:[-*•]\s+)", "", value)
+    value = re.sub(r"\s+", " ", value)
+    for _ in range(2):
+        value = value.strip("`*_\"'“”‘’ ")
+        value = value.rstrip(".,;:!?。！？；：").strip()
+    return value
 
 
 def _join_api_path(base_url, endpoint):
