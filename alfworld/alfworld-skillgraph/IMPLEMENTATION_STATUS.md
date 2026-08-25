@@ -13,11 +13,17 @@ Implemented and directly smoke-tested with the standard library:
 - Balanced 18-task validation scheduling (six condition orders, exactly three occurrences each).
 - `stage0_run.py --dry-run` emits only explicitly marked scaffold/placeholder artifacts.
 - Preregistration is written once per run; its exact final JSON-byte SHA-256 is stored only in `preregistration.sha256` (no self-referential JSON hash).
+- Offline vertical slice: injectable standard-library DeepSeek request seam with explicit Executor/meta thinking contracts, auditable usage/latency/error records, strict one-action Executor parser, 50-step-bounded EpisodeRunner, and lazy train-only `AlfredTWEnv` adapter.
+- Offline fake transport/environment smoke CLI writes a marked `scaffold_smoke` trajectory JSON without network/API calls.
+- Offline evolution seam validates representation-neutral Failure/Preservation/Root Cause IR, rejects hidden expert/PDDL and instance scope, gates Root Cause selection on distinct support and patchability, and sends identical de-instantiated generator context with one semantic call per generator.
+- Structured JSON responses have deterministic display normalization plus at most three format-only repairs with semantic fingerprint checking; candidates are budget-validated through the existing patch/full-rewrite validators and stored as unified `CandidateResult` records.
+- Blind seven-field semantic verification hides method/provenance/score labels and cannot veto a structurally valid candidate; `ArtifactWriter` emits IR/candidate/verifier JSON/JSONL and exact UTF-8 SHA-256 sidecars while rejecting credential fields.
+- Paused orchestration is available through `Stage0Pipeline`: train-only manifests, S0 generation/human gate, hash-checked resume, calibration floor/ceiling stop, shared evolution, balanced validation scheduling, descriptive metrics, explicit seven-condition go/no-go, blinded audit packet, code-state record, and §16 artifact layout. `stage0_cli.py` exposes prepare/approve/run/resume/status/offline-smoke.
 
 Still intentionally unavailable and therefore blocked:
 
-- ALFWorld rollout/evaluator integration, DeepSeek API adapter and request logging.
-- Failure IR, Preservation IR, Root Cause merge, candidate generation/format repair, semantic audit, dynamic validation, and the final go/no-go experiment.
+- Formal ALFWorld rollout/evaluator integration and live DeepSeek execution remain blocked by the deliberate `stage0_run.py` non-dry-run guard. The HTTPS transport seam exists but was not invoked in tests.
+- No real API request or 90-episode run was executed here. Live ALFWorld environment wiring, credentials, human approval, and explicit `--confirm-live-run` remain required external inputs; CLI is fail-closed without them.
 - A human-gated generated S0; the dry-run baseline is a placeholder and cannot be used as an experiment artifact.
 
-`pytest` is not installed in this environment. `python -m py_compile` and direct invocation of all `test_*` functions in `test_stage0_core.py` and `test_stage0_run.py` pass.
+`pytest` is not installed in this environment. `python -m py_compile`, 63 direct target `test_*` functions (including S0/metrics/pipeline/CLI plus IR/evolution/format/verifier/artifact and earlier suites), and the existing 8 `run_alf_bench` unittest cases pass.

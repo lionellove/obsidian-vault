@@ -145,8 +145,8 @@ def test_dry_run_is_placeholder_and_non_dry_run_fails_closed():
         assert "preregistration_hash" not in dry
         assert main(["--repo-root", str(root), "--data-root", str(missing_data), "--run-id", "live"]) == 2
         live = json.loads((root / "results" / "skillgraph_stage0" / "live" / "preregistration.json").read_text(encoding="utf-8"))
-        assert live["status"] == "blocked_non_dry_run_unimplemented"
-        assert "not implemented" in live["error"]
+        assert live["status"] == "blocked_prerequisites"
+        assert "blocked" in live["error"]
         live_json = root / "results" / "skillgraph_stage0" / "live" / "preregistration.json"
         live_sidecar = root / "results" / "skillgraph_stage0" / "live" / "preregistration.sha256"
         assert live_sidecar.read_text(encoding="ascii").strip() == sha256_file(live_json)

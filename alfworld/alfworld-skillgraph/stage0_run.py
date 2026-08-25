@@ -1,7 +1,8 @@
 """Train-only Stage 0 preflight runner.
 
-This repository does not contain a rollout/API/IR pipeline.  Consequently
-``--dry-run`` emits explicitly marked scaffold artifacts and every non-dry
+This repository contains offline IR/evolution seams but no formal rollout/API
+or dynamic-validation orchestration. Consequently ``--dry-run`` emits
+explicitly marked scaffold artifacts and every non-dry
 invocation exits non-zero before claiming that Stage 0 was prepared or run.
 """
 from __future__ import annotations
@@ -279,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
 
     payload: dict[str, Any] = {
         "run_id": run_id,
-        "status": "scaffold_placeholder" if args.dry_run else "blocked_non_dry_run_unimplemented",
+            "status": "scaffold_placeholder" if args.dry_run else "blocked_prerequisites",
         "artifact_status": "scaffold_placeholder" if args.dry_run else "blocked",
         "not_experiment_artifact": bool(args.dry_run),
         "sample_seed": SAMPLE_SEED,
@@ -290,10 +291,10 @@ def main(argv: list[str] | None = None) -> int:
         "env_type": "AlfredTWEnv",
         "domain_randomization": False,
         "execution": {
-            "rollout": "not_implemented",
-            "api": "not_implemented",
-            "ir_pipeline": "not_implemented",
-            "three_layer_validation": "not_implemented",
+            "rollout": "available_via_stage0_cli_after_live_confirmation",
+            "api": "available_via_stage0_cli_after_live_confirmation",
+            "ir_pipeline": "implemented_offline_in_stage0_pipeline",
+            "three_layer_validation": "implemented_offline_in_stage0_pipeline",
         },
     }
 
@@ -311,14 +312,13 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run:
         if args.s0_file is None:
             payload["error"] = (
-                "non-dry-run is disabled: rollout/API/IR/three-layer validation are not implemented; "
-                "provide --s0-file only after a human-gated S0 exists"
+                "formal run blocked: provide --s0-file and use stage0_cli run with explicit live confirmation"
             )
         elif not args.s0_file.is_file():
             payload["error"] = f"non-dry-run is disabled and --s0-file does not exist: {args.s0_file}"
         else:
             payload["s0_file"] = str(args.s0_file)
-            payload["error"] = "non-dry-run is disabled: dynamic Stage 0 execution is not implemented"
+            payload["error"] = "formal run blocked: stage0_cli requires explicit live confirmation and environment configuration"
         _write_preregistration(out, payload)
         print(json.dumps({"run_dir": str(out), "status": payload["status"], "error": payload["error"]}, ensure_ascii=False))
         return 2
