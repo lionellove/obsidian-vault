@@ -29,6 +29,7 @@ from stage0_core import (
     task_id_key,
     validate_skill,
 )
+from stage0_metrics import pricing_metadata
 
 SAMPLE_SEED = 20260825
 ENVIRONMENT_SEED = 20260825
@@ -287,6 +288,7 @@ def main(argv: list[str] | None = None) -> int:
         "environment_seed": ENVIRONMENT_SEED,
         "data_root": str(args.data_root),
         "model": "deepseek-v4-flash",
+        "pricing": pricing_metadata(model="deepseek-v4-flash"),
         "max_steps": 50,
         "env_type": "AlfredTWEnv",
         "domain_randomization": False,

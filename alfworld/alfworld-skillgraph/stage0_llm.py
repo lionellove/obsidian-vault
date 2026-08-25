@@ -60,6 +60,31 @@ ROLE_DEFAULTS: dict[str, dict[str, Any]] = {
     },
 }
 
+# These prompts are part of the frozen Stage 0 wire contract.  The context
+# supplied by both candidate generators remains byte-identical; only the
+# declared role instruction differs.  Keeping the instruction outside the
+# user context makes it impossible for a generator to silently receive a
+# different evidence bundle.
+META_ROLE_PROMPTS: dict[str, str] = {
+    "s0_generator": "You are the Stage 0 S0 generator. Return only the public Skill Package JSON described by the supplied schema. Never use task instances, trajectories, expert plans, or hidden state.",
+    "failure_analyzer": "You are the Stage 0 failure analyzer. Return exactly one validated Failure IR JSON object from the public trajectory view; do not invent support or hidden execution facts.",
+    "success_analyzer": "You are the Stage 0 success analyzer. Return exactly one validated Preservation IR JSON object from the public trajectory view; do not use expert or hidden state.",
+    "root_cause_merger": "You are the Stage 0 root-cause merger. Return only validated root-cause candidates supported by the supplied Failure IR rows.",
+    "structured_patch": "You are the Stage 0 Structured Semantic Patch generator. Return only a structured patch JSON (or explicit NO_PATCH) satisfying the supplied schema. Bind every edit to the selected root cause.",
+    "full_rewrite": "You are the Stage 0 Full Rewrite generator. Return only a full-rewrite JSON (or explicit NO_PATCH) satisfying the supplied schema. The manifest must describe the complete deterministic rewrite diff.",
+    "semantic_verifier": "You are the blind Stage 0 semantic verifier. Return only the seven numeric audit fields in the supplied schema. Do not infer the candidate method, generator label, or validation score.",
+}
+
+META_ROLE_SCHEMAS: dict[str, dict[str, Any]] = {
+    "structured_patch": {"type": "object", "required": ["semantic_patch"], "additionalProperties": True},
+    "full_rewrite": {"type": "object", "required": ["full_rewrite"], "additionalProperties": True},
+    "semantic_verifier": {"type": "object", "required": ["relevance", "generality", "contradiction", "redundancy", "over_specificity", "root_cause_coverage", "preservation_risk"], "additionalProperties": False},
+    "s0_generator": {"type": "object", "required": ["skill_package"], "additionalProperties": True},
+    "failure_analyzer": {"type": "object", "required": ["failure_id", "trace_id", "task_id"], "additionalProperties": True},
+    "success_analyzer": {"type": "object", "required": ["preservation_id", "trace_id", "task_id"], "additionalProperties": True},
+    "root_cause_merger": {"type": "object", "required": ["root_causes"], "additionalProperties": False},
+}
+
 
 class DeepSeekAPIError(RuntimeError):
     """A request or response failed closed."""
@@ -173,6 +198,12 @@ def _normalize_usage(response: Mapping[str, Any]) -> dict[str, Any]:
     usage = response.get("usage")
     if not isinstance(usage, Mapping):
         usage = {}
+    reasoning_tokens = _first_present(usage, "reasoning_tokens")
+    completion_details = usage.get("completion_tokens_details")
+    if isinstance(completion_details, Mapping):
+        nested_reasoning_tokens = _first_present(completion_details, "reasoning_tokens")
+        if nested_reasoning_tokens is not None:
+            reasoning_tokens = nested_reasoning_tokens
     return {
         "prompt_tokens": _first_present(usage, "prompt_tokens", "input_tokens"),
         "cache_hit_tokens": _first_present(
@@ -181,7 +212,7 @@ def _normalize_usage(response: Mapping[str, Any]) -> dict[str, Any]:
         "cache_miss_tokens": _first_present(
             usage, "prompt_cache_miss_tokens", "cache_miss_tokens", "cache_creation_input_tokens"
         ),
-        "reasoning_tokens": _first_present(usage, "reasoning_tokens"),
+        "reasoning_tokens": reasoning_tokens,
         "output_tokens": _first_present(usage, "completion_tokens", "output_tokens"),
     }
 
@@ -228,6 +259,8 @@ class DeepSeekClient:
         role: str,
         messages: list[Mapping[str, str]],
         token_budget: int | None = None,
+        response_format: Mapping[str, Any] | None = None,
+        stage0_schema: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if role not in ROLE_DEFAULTS:
             raise ValueError(f"unknown DeepSeek role: {role}")
@@ -247,6 +280,12 @@ class DeepSeekClient:
             body["temperature"] = defaults["temperature"]
         if "reasoning_effort" in defaults:
             body["reasoning_effort"] = defaults["reasoning_effort"]
+        if response_format is not None:
+            body["response_format"] = dict(response_format)
+        # DeepSeek JSON mode accepts only the standard response_format field
+        # on the wire.  The local schema envelope is recorded by ``complete``
+        # and rendered into the frozen system prompt by ``complete_meta``;
+        # never send a provider-unknown top-level field.
         return body
 
     def complete(
@@ -255,8 +294,16 @@ class DeepSeekClient:
         role: str,
         messages: list[Mapping[str, str]],
         token_budget: int | None = None,
+        response_format: Mapping[str, Any] | None = None,
+        stage0_schema: Mapping[str, Any] | None = None,
     ) -> LLMResult:
-        body = self.build_request(role=role, messages=messages, token_budget=token_budget)
+        body = self.build_request(
+            role=role,
+            messages=messages,
+            token_budget=token_budget,
+            response_format=response_format,
+            stage0_schema=stage0_schema,
+        )
         timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         started = time.perf_counter()
         record: dict[str, Any] = {
@@ -276,6 +323,8 @@ class DeepSeekClient:
             "latency_seconds": None,
             "raw_response": None,
         }
+        if stage0_schema is not None:
+            record["schema_envelope"] = json.loads(json.dumps(stage0_schema, ensure_ascii=False, sort_keys=True))
         record["request"] = body
         headers: dict[str, str] = {}
         if self.api_key:
@@ -357,8 +406,19 @@ class DeepSeekClient:
             raise ValueError("complete_meta requires thinking.type=enabled")
         if not isinstance(context, str):
             context = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        schema = META_ROLE_SCHEMAS[role]
+        system_prompt = (
+            META_ROLE_PROMPTS[role]
+            + "\nThe response must be valid JSON. Local schema contract (enforced after the response):\n"
+            + json.dumps(schema, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        )
         return self.complete(
             role=role,
-            messages=[{"role": "user", "content": context}],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": context},
+            ],
             token_budget=token_budget,
+            response_format={"type": "json_object"},
+            stage0_schema={"name": f"stage0_{role}", "schema": schema},
         )

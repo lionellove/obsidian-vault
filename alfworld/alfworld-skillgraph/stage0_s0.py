@@ -139,8 +139,13 @@ class S0Generator:
             raise TypeError("S0 client must provide complete_meta")
         return method(role="s0_generator", context=context, token_budget=self.token_budget)
 
-    def generate(self) -> S0GenerationResult:
+    def generate(self, *, feedback: list[str] | None = None) -> S0GenerationResult:
         context = copy.deepcopy(PUBLIC_S0_CONTEXT)
+        if feedback:
+            invalid = [label for label in feedback if label not in S0_GATE_FIELDS]
+            if invalid:
+                raise ValueError(f"unknown S0 gate feedback labels: {invalid}")
+            context["gate_feedback"] = list(feedback)
         prompt = canonical(context)
         records: list[dict] = []
         raw_response: Any = None

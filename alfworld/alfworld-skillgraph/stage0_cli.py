@@ -32,19 +32,34 @@ def _denylist(run_dir: Path) -> set[str]:
 def _build_pipeline(args: argparse.Namespace, *, client: Any) -> Stage0Pipeline:
     run_dir = Path(args.run_dir)
     state = _read_json(run_dir / "state.json") if (run_dir / "state.json").exists() else {}
-    repo_root = Path(args.repo_root) if getattr(args, "repo_root", None) else run_dir.parent.parent.parent
-    data_root = Path(args.data_root) if getattr(args, "data_root", None) else None
+    saved_repo = state.get("repo_root") or state.get("frozen_config", {}).get("repo_root")
+    saved_data = state.get("data_root") or state.get("frozen_config", {}).get("data_root")
+    explicit_repo = getattr(args, "repo_root", None)
+    explicit_data = getattr(args, "data_root", None)
+    if saved_repo and explicit_repo and Path(explicit_repo).resolve() != Path(saved_repo).resolve():
+        raise RuntimeError("--repo-root disagrees with frozen state repo_root")
+    if saved_data and explicit_data:
+        try:
+            saved_train = resolve_train_root(saved_data)
+            explicit_train = resolve_train_root(explicit_data)
+            if saved_train.resolve() != explicit_train.resolve():
+                raise RuntimeError("--data-root disagrees with frozen state data_root")
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"--data-root cannot be reconciled with frozen state: {exc}") from exc
+    repo_root = Path(saved_repo or explicit_repo) if (saved_repo or explicit_repo) else None
+    data_root = Path(saved_data or explicit_data) if (saved_data or explicit_data) else None
+    if state and repo_root is None:
+        raise RuntimeError("frozen state is missing repo_root")
     manifests = _task_manifests(run_dir) if (run_dir / "manifests").exists() else None
     denylist = _denylist(run_dir) if (run_dir / "manifests" / "denylist.json").exists() else None
-    data_fingerprint = None
-    if state and manifests is not None:
-        data_fingerprint = sha256(canonical({"data_root": str(data_root) if data_root else None, "manifests": manifests, "denylist": sorted(denylist or set())}))
+    data_fingerprint = state.get("data_fingerprint") if state else None
     environment_factory = None
     if data_root is not None:
         from stage0_alfworld import create_alfworld_env
 
         train_root = resolve_train_root(data_root)
-        environment_factory = lambda task_id, condition, seed: create_alfworld_env(train_root, task_id)
+        environment_factory = lambda task_id, condition, seed: create_alfworld_env(train_root, task_id, environment_seed=seed)
+    frozen = state.get("frozen_config", {}) if isinstance(state.get("frozen_config"), dict) else {}
     return Stage0Pipeline(
         run_dir,
         client=client,
@@ -54,6 +69,7 @@ def _build_pipeline(args: argparse.Namespace, *, client: Any) -> Stage0Pipeline:
         task_manifests=manifests,
         denylist=denylist,
         environment_seed=state.get("environment_seed", ENVIRONMENT_SEED),
+        testing_plan_size=int(frozen.get("testing_plan_size", state.get("testing_plan_size", 18))),
         # Recompute the current code fingerprint; passing the frozen value
         # here would make resume unable to detect a dirty/code change.
         code_fingerprint=None,
@@ -99,10 +115,19 @@ def _require_live(args: argparse.Namespace, *, require_confirmation: bool) -> st
     key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if not key:
         return "live run requires DEEPSEEK_API_KEY"
-    if not getattr(args, "data_root", None):
+    state_path = Path(args.run_dir) / "state.json"
+    saved_data = None
+    if state_path.is_file():
+        try:
+            state = _read_json(state_path)
+            saved_data = state.get("data_root") or state.get("frozen_config", {}).get("data_root")
+        except (OSError, ValueError, TypeError):
+            saved_data = None
+    data_root = getattr(args, "data_root", None) or saved_data
+    if not data_root:
         return "live run requires --data-root"
     try:
-        resolve_train_root(args.data_root)
+        resolve_train_root(data_root)
     except (OSError, ValueError) as exc:
         return f"live run requires a valid train data root: {exc}"
     return None
@@ -120,6 +145,16 @@ def main(argv: list[str] | None = None) -> int:
     approve.add_argument("--checklist", required=True, type=Path)
     approve.add_argument("--auditor", required=True)
     approve.add_argument("--timestamp", default=None)
+    reject = sub.add_parser("reject-s0")
+    reject.add_argument("--run-dir", required=True, type=Path)
+    reject.add_argument("--checklist", required=True, type=Path)
+    reject.add_argument("--reason", default=None)
+    reject.add_argument("--repo-root", type=Path, default=None)
+    reject.add_argument("--data-root", type=Path, default=None)
+    for name in ("submit-audit", "audit-submit"):
+        audit = sub.add_parser(name)
+        audit.add_argument("--run-dir", required=True, type=Path)
+        audit.add_argument("--scores", required=True, type=Path)
     status = sub.add_parser("status")
     status.add_argument("--run-dir", required=True, type=Path)
     for command in ("run", "resume"):
@@ -141,8 +176,23 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "approve":
             checklist = _read_json(args.checklist)
-            pipeline = Stage0Pipeline(args.run_dir)
+            pipeline = _build_pipeline(args, client=None)
             state = pipeline.approve(checklist, auditor=args.auditor, timestamp=args.timestamp)
+            print(json.dumps({"status": state["status"], "run_dir": str(args.run_dir)}, ensure_ascii=False))
+            return 0
+        if args.command == "reject-s0":
+            error = _require_live(args, require_confirmation=False)
+            if error:
+                print(error, file=sys.stderr)
+                return 2
+            checklist = _read_json(args.checklist)
+            pipeline = _build_pipeline(args, client=DeepSeekClient())
+            state = pipeline.reject_human_gate(checklist, reason=args.reason)
+            print(json.dumps({"status": state["status"], "run_dir": str(args.run_dir)}, ensure_ascii=False))
+            return 0 if state.get("status") != "error" else 2
+        if args.command in {"submit-audit", "audit-submit"}:
+            pipeline = _build_pipeline(args, client=None)
+            state = pipeline.submit_human_scores(args.scores)
             print(json.dumps({"status": state["status"], "run_dir": str(args.run_dir)}, ensure_ascii=False))
             return 0
         error = _require_live(args, require_confirmation=args.command in {"run", "resume"})

@@ -81,6 +81,36 @@ def test_executor_request_contract_and_response_metadata():
     assert "secret-for-memory-only" not in json.dumps(record)
 
 
+def test_official_completion_tokens_details_reasoning_usage_is_normalized():
+    transport = FakeTransport(
+        response={
+            "id": "resp_official_usage",
+            "model": "deepseek-v4-flash",
+            "system_fingerprint": "fp_official",
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {
+                "prompt_tokens": 21,
+                "prompt_cache_hit_tokens": 4,
+                "prompt_cache_miss_tokens": 17,
+                "completion_tokens": 13,
+                "completion_tokens_details": {"reasoning_tokens": 9},
+            },
+        }
+    )
+    result = DeepSeekClient(transport=transport, api_key="secret").complete(
+        role="executor",
+        messages=[{"role": "user", "content": "choose"}],
+    )
+
+    assert result.record["usage"] == {
+        "prompt_tokens": 21,
+        "cache_hit_tokens": 4,
+        "cache_miss_tokens": 17,
+        "reasoning_tokens": 9,
+        "output_tokens": 13,
+    }
+
+
 def test_meta_roles_share_context_and_budget_and_enable_max_thinking():
     transport = FakeTransport()
     client = DeepSeekClient(transport=transport, api_key="secret")
@@ -88,7 +118,14 @@ def test_meta_roles_share_context_and_budget_and_enable_max_thinking():
     client.complete_meta(role="structured_patch", context=context, token_budget=777)
     client.complete_meta(role="full_rewrite", context=context, token_budget=777)
     first, second = [call["payload"] for call in transport.calls]
-    assert first["messages"] == second["messages"]
+    assert first["messages"][1] == second["messages"][1]
+    assert first["messages"][0]["role"] == second["messages"][0]["role"] == "system"
+    assert first["messages"][0]["content"] != second["messages"][0]["content"]
+    assert first["response_format"] == second["response_format"] == {"type": "json_object"}
+    assert "stage0_schema" not in first
+    assert "stage0_schema" not in second
+    assert "schema" in first["messages"][0]["content"].casefold()
+    assert "schema" in second["messages"][0]["content"].casefold()
     assert first["max_tokens"] == second["max_tokens"] == 777
     assert first["thinking"] == second["thinking"] == {"type": "enabled"}
     assert first["reasoning_effort"] == second["reasoning_effort"] == "max"

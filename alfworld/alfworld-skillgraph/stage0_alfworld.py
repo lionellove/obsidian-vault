@@ -40,8 +40,9 @@ def resolve_manifest_gamefile(train_root: str | Path, task_id: str | Path) -> Pa
 class AlfredTWEnvAdapter:
     """Convert a scalar-action EpisodeEnvironment call into ALFWorld batching."""
 
-    def __init__(self, env: Any) -> None:
+    def __init__(self, env: Any, *, environment_seed: int | None = None) -> None:
         self._env = env
+        self.environment_seed = environment_seed
 
     def reset(self) -> Any:
         return self._env.reset()
@@ -81,11 +82,21 @@ def create_alfworld_env(
     config: Mapping[str, Any] | None = None,
     config_file: str | Path | None = None,
     env_type: str = "AlfredTWEnv",
+    environment_seed: int | None = None,
+    seed: int | None = None,
 ) -> AlfredTWEnvAdapter:
     """Create one lazy-imported TextWorld environment for one train task."""
 
     if env_type != "AlfredTWEnv":
         raise ValueError("Stage 0 currently supports only env_type=AlfredTWEnv")
+    if environment_seed is not None and seed is not None and int(environment_seed) != int(seed):
+        raise ValueError("environment_seed and seed disagree")
+    if environment_seed is None:
+        environment_seed = seed
+    if environment_seed is not None and (
+        isinstance(environment_seed, bool) or not isinstance(environment_seed, int)
+    ):
+        raise ValueError("environment_seed must be an integer")
     train = resolve_train_root(train_root)
     gamefile = resolve_manifest_gamefile(train, task_id)
     if config is not None and config_file is not None:
@@ -100,9 +111,18 @@ def create_alfworld_env(
         dataset = config_dict.setdefault("dataset", {})
         env_config = config_dict.setdefault("env", {})
         general = config_dict.setdefault("general", {})
-        dataset["data_path"] = str(train)
+        # AlfredTWEnv recursively scans data_path during construction.  The
+        # manifest already resolved an exact game file, so scope the config
+        # to that trial directory and avoid rescanning the full 3.5k-task
+        # train tree for every paired episode.
+        dataset["data_path"] = str(gamefile.parent)
         dataset["num_train_games"] = 1
         env_config["domain_randomization"] = False
+        if environment_seed is not None:
+            # Keep the seed in the config passed to ALFWorld as well as on
+            # the adapter, so a resumed paired episode is reproducible.
+            env_config["seed"] = environment_seed
+            general["random_seed"] = environment_seed
         # The train split normally enables expert-plan wrappers for dagger;
         # Stage 0 must never expose expert trajectories to the Executor.
         general["training_method"] = "dqn"
@@ -127,4 +147,4 @@ def create_alfworld_env(
         raise AlfredTWEnvDependencyError(
             f"could not initialize AlfredTWEnv for {gamefile}: {exc}"
         ) from exc
-    return AlfredTWEnvAdapter(env)
+    return AlfredTWEnvAdapter(env, environment_seed=environment_seed)

@@ -150,7 +150,7 @@ def test_fake_pipeline_runs_calibration_evolution_and_dynamic_go_gate():
         pipeline.prepare()
         pipeline.approve({"schema_valid": True, "no_instance_leakage": True, "six_family_applicable": True, "no_contradiction": True, "within_budget": True}, auditor="tester", timestamp="now")
         state = pipeline.run()
-        assert state["status"] == "completed"
+        assert state["status"] == "awaiting_human_audit"
         assert state["stage0_gate"]["go"] is True
         assert (root / "report" / "metrics.json").exists()
         assert (root / "audit" / "blinded_packet.json").exists()
@@ -158,5 +158,15 @@ def test_fake_pipeline_runs_calibration_evolution_and_dynamic_go_gate():
         assert "semantic_patch" not in packet_text
         assert "full_rewrite" not in packet_text
         assert '"validation_score":' not in packet_text
+        assert "expert_plan_status" in packet_text
         assert any(role == "structured_patch" for role, _, _ in client.calls)
         assert any(role == "full_rewrite" for role, _, _ in client.calls)
+        rubric = {field: 4 for field in ("failure_ir_evidence", "root_cause_explanation", "scope_reusability", "non_skill_error_check", "representation_choice", "edit_coherence", "unsupported_new_rules", "preservation_integrity")}
+        scores = {"candidate_1": rubric, "candidate_2": rubric}
+        completed = pipeline.submit_human_scores({"reviewer": "tester", "scores": scores})
+        # This fake semantic client deliberately has no real usage records;
+        # the cost gate therefore keeps the run non-completed.
+        assert completed["status"] == "awaiting_human_audit"
+        assert completed["completion_scope"] == "blocked_cost_incomplete"
+        metrics = json.loads((root / "report" / "metrics.json").read_text(encoding="utf-8"))
+        assert metrics["api_cost"]["status"] == "incomplete"

@@ -81,7 +81,38 @@ class EpisodeRunner:
         self.executor = executor
         self.max_steps = max_steps
 
-    def run(self, *, task_id: str | None = None) -> dict[str, Any]:
+    def run(
+        self,
+        *,
+        task_id: str | None = None,
+        environment_seed: int | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one episode and close the adapter on every exit path.
+
+        ``trace_id`` is supplied by the orchestration layer when phase and
+        condition are known.  The deterministic fallback keeps standalone
+        episodes reproducible while still binding the row to its task/seed.
+        """
+
+        try:
+            return self._run(
+                task_id=task_id,
+                environment_seed=environment_seed,
+                trace_id=trace_id,
+            )
+        finally:
+            close = getattr(self.env, "close", None)
+            if callable(close):
+                close()
+
+    def _run(
+        self,
+        *,
+        task_id: str | None = None,
+        environment_seed: int | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
         reset_value = self.env.reset()
         if not isinstance(reset_value, (tuple, list)) or len(reset_value) != 2:
             raise RuntimeError("environment reset must return (observation, info)")
@@ -245,7 +276,13 @@ class EpisodeRunner:
                 termination = "environment_done"
                 break
 
+        resolved_trace_id = trace_id
+        if not isinstance(resolved_trace_id, str) or not resolved_trace_id.strip():
+            resolved_trace_id = hashlib.sha256(
+                f"stage0-episode|{resolved_task_id}|{environment_seed}".encode("utf-8")
+            ).hexdigest()[:24]
         return {
+            "trace_id": resolved_trace_id,
             "task_id": resolved_task_id,
             "task_goal": task_goal,
             "success": success,

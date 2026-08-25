@@ -49,6 +49,18 @@ def _assert_no_secrets(value: Any, path: str = "artifact") -> None:
         raise ArtifactSafetyError(f"API key value found in {path}")
 
 
+def safe_plain(value: Any) -> Any:
+    """Public serialization helper shared by pipeline and artifact writer."""
+
+    return _plain(value)
+
+
+def assert_no_secrets(value: Any) -> None:
+    """Reject credentials before any JSON/text bytes are written."""
+
+    _assert_no_secrets(value)
+
+
 class ArtifactWriter:
     """Write IR, candidates, verifier audits and exact-byte hash sidecars."""
 
@@ -61,6 +73,20 @@ class ArtifactWriter:
         path.write_bytes(payload)
         sidecar = Path(str(path) + ".sha256")
         sidecar.write_text(sha256_file(path) + "\n", encoding="utf-8")
+        return path
+
+    def write_json_atomic(self, relative: str | Path, value: Any) -> Path:
+        """Atomically replace a JSON artifact and its content hash sidecar."""
+
+        plain = _plain(value)
+        _assert_no_secrets(plain)
+        payload = (json.dumps(plain, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_bytes(payload)
+        os.replace(temporary, path)
+        Path(str(path) + ".sha256").write_text(sha256_file(path) + "\n", encoding="ascii")
         return path
 
     def _write_json(self, relative: str | Path, value: Any) -> Path:
@@ -124,4 +150,4 @@ class ArtifactWriter:
         return paths
 
 
-__all__ = ["ArtifactSafetyError", "ArtifactWriter"]
+__all__ = ["ArtifactSafetyError", "ArtifactWriter", "assert_no_secrets", "safe_plain"]

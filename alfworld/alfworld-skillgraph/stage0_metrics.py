@@ -3,11 +3,95 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from stage0_core import paired_outcomes, render_skill
+from stage0_core import canonical, paired_outcomes, render_skill
+
+
+PRICING_SOURCE = "https://api-docs.deepseek.com/quick_start/pricing/"
+PRICING_MODEL = "deepseek-v4-flash"
+PRICING_RATES_USD_PER_MILLION = {
+    "cache_hit_tokens": 0.0028,
+    "cache_miss_tokens": 0.14,
+    "output_tokens": 0.28,
+}
+
+
+def pricing_metadata(*, captured_at: str | None = None, model: str = PRICING_MODEL) -> dict[str, Any]:
+    stamp = captured_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return {
+        "captured_at": stamp,
+        "source": PRICING_SOURCE,
+        "model": model,
+        "rates_usd_per_million_tokens": dict(PRICING_RATES_USD_PER_MILLION),
+        "basis": "estimated_base_rate_not_actual_invoice",
+    }
+
+
+def _usage_field(usage: dict[str, Any], field: str) -> Any:
+    aliases = {
+        "prompt_tokens": ("prompt_tokens", "input_tokens"),
+        "cache_hit_tokens": ("cache_hit_tokens", "prompt_cache_hit_tokens", "cache_read_input_tokens"),
+        "cache_miss_tokens": ("cache_miss_tokens", "prompt_cache_miss_tokens", "cache_creation_input_tokens"),
+        "reasoning_tokens": ("reasoning_tokens",),
+        "output_tokens": ("output_tokens", "completion_tokens"),
+    }
+    for key in aliases[field]:
+        if key in usage:
+            return usage[key]
+    return None
+
+
+def estimate_api_cost(
+    records: Iterable[dict],
+    *,
+    captured_at: str | None = None,
+    model: str = PRICING_MODEL,
+) -> dict[str, Any]:
+    """Estimate base-rate spend from real request usage, never invoice spend."""
+
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        marker = canonical(record)
+        if marker not in seen:
+            seen.add(marker)
+            unique.append(copy.deepcopy(record))
+    totals = {field: 0 for field in ("prompt_tokens", "cache_hit_tokens", "cache_miss_tokens", "reasoning_tokens", "output_tokens")}
+    missing: list[str] = []
+    for index, record in enumerate(unique):
+        usage = record.get("usage")
+        usage_map = usage if isinstance(usage, dict) else {}
+        for field in totals:
+            value = _usage_field(usage_map, field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+                if field in ("cache_hit_tokens", "cache_miss_tokens", "output_tokens"):
+                    missing.append(f"{index}:{field}")
+                continue
+            totals[field] += value
+    pricing = pricing_metadata(captured_at=captured_at, model=model)
+    complete = bool(unique) and not missing
+    cost = None
+    if complete:
+        cost = sum(
+            totals[field] / 1_000_000 * PRICING_RATES_USD_PER_MILLION[field]
+            for field in ("cache_hit_tokens", "cache_miss_tokens", "output_tokens")
+        )
+    return {
+        "status": "complete" if complete else "incomplete",
+        "estimated_api_cost_usd": cost,
+        "basis": "estimated_base_rate_not_actual_invoice",
+        "request_count": len(unique),
+        "usage": totals,
+        "missing_billing_usage": missing,
+        "pricing": pricing,
+    }
 
 
 def _value(value: Any, key: str, default: Any = None) -> Any:
@@ -156,10 +240,15 @@ def skill_render_metrics(skill: dict) -> dict[str, Any]:
 
 
 __all__ = [
+    "PRICING_MODEL",
+    "PRICING_RATES_USD_PER_MILLION",
+    "PRICING_SOURCE",
+    "estimate_api_cost",
     "evaluate_calibration_gate",
     "evaluate_stage0_gate",
     "family_success_vector",
     "paired_rows",
     "skill_render_metrics",
+    "pricing_metadata",
     "summarize_episode_metrics",
 ]

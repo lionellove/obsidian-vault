@@ -248,7 +248,14 @@ def blind_semantic_verify(
         "candidate": candidate_view,
         "rubric_fields": list(SEMANTIC_FIELDS),
     }
-    raw = auditor_client.complete_meta("semantic_verifier", context, token_budget)
+    # DeepSeekClient deliberately exposes a keyword-only meta seam.  Keeping
+    # this call explicit also prevents a permissive fake from hiding a wire
+    # contract regression in the semantic audit path.
+    raw = auditor_client.complete_meta(
+        role="semantic_verifier",
+        context=context,
+        token_budget=token_budget,
+    )
     content = _raw_content(raw)
     try:
         value = normalize_json_response(content)

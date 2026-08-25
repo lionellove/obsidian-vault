@@ -82,3 +82,57 @@ def test_missing_alfworld_dependency_has_clear_error_without_import_at_module_lo
             # A real ALFWorld import may be available in some environments;
             # missing config is still a clear preflight failure, not a network call.
             pass
+
+
+def test_factory_scopes_data_path_and_writes_random_seed(monkeypatch=None):
+    """Fake lazy import verifies the exact ALFWorld config seam."""
+    import sys
+    from types import ModuleType
+    from stage0_alfworld import create_alfworld_env
+
+    class FakeEnv:
+        def reset(self):
+            return "obs", {}
+
+        def step(self, actions):
+            return "obs", 0, True, {}
+
+    captured = {}
+
+    class Factory:
+        game_files = []
+        num_games = 0
+
+        def __init__(self, config):
+            captured["config"] = config
+
+        def init_env(self, batch_size=1):
+            captured["batch_size"] = batch_size
+            return FakeEnv()
+
+    environment = ModuleType("alfworld.agents.environment")
+    environment.get_environment = lambda env_type: (lambda config, train_eval: Factory(config))
+    agents = ModuleType("alfworld.agents")
+    alfworld = ModuleType("alfworld")
+    agents.environment = environment
+    alfworld.agents = agents
+    old = {name: sys.modules.get(name) for name in ("alfworld", "alfworld.agents", "alfworld.agents.environment")}
+    sys.modules["alfworld"] = alfworld
+    sys.modules["alfworld.agents"] = agents
+    sys.modules["alfworld.agents.environment"] = environment
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            train = Path(tmp) / "json_2.1.1" / "train"
+            game = train / "pick_and_place_simple-Vase-None-Safe-1" / "trial_T" / "game.tw-pddl"
+            game.parent.mkdir(parents=True)
+            game.write_text("", encoding="utf-8")
+            adapter = create_alfworld_env(train, str(game.relative_to(train)), config={}, environment_seed=41)
+            assert captured["config"]["dataset"]["data_path"] == str(game.parent)
+            assert captured["config"]["general"]["random_seed"] == 41
+            assert adapter.environment_seed == 41
+    finally:
+        for name, value in old.items():
+            if value is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = value

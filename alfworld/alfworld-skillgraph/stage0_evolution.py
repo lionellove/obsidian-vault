@@ -291,6 +291,52 @@ class EvolutionResult:
             "errors": list(self.errors),
         }
 
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "EvolutionResult":
+        """Rehydrate a frozen semantic stage without another model request."""
+
+        if not isinstance(value, dict):
+            raise ValueError("EvolutionResult artifact must be an object")
+
+        def candidate(raw: Any) -> CandidateResult | None:
+            if not isinstance(raw, dict):
+                return None
+            return CandidateResult(
+                method=str(raw.get("method", "")),
+                status=str(raw.get("status", "INVALID")),
+                raw_response=raw.get("raw_response"),
+                final_ir=raw.get("final_ir"),
+                format_repairs=list(raw.get("format_repairs", [])),
+                structural_result=raw.get("structural_result"),
+                eligible_for_dynamic_validation=bool(raw.get("eligible_for_dynamic_validation", False)),
+                request_records=list(raw.get("request_records", [])),
+                error=raw.get("error"),
+            )
+
+        def verifier(raw: Any) -> VerifierResult | None:
+            if not isinstance(raw, dict):
+                return None
+            return VerifierResult(
+                scores=dict(raw.get("scores", {})),
+                eligible_for_dynamic_validation=bool(raw.get("eligible_for_dynamic_validation", True)),
+                raw_response=raw.get("raw_response"),
+                request_record=raw.get("request_record"),
+                valid=bool(raw.get("valid", True)),
+                error=raw.get("error"),
+            )
+
+        return cls(
+            failures=list(value.get("failures", [])),
+            preservations=list(value.get("preservations", [])),
+            root_cause=dict(value.get("root_cause", {"status": NO_ROOT_CAUSE})),
+            structured_candidate=candidate(value.get("structured_candidate")),
+            rewrite_candidate=candidate(value.get("rewrite_candidate")),
+            structured_verifier=verifier(value.get("structured_verifier")),
+            rewrite_verifier=verifier(value.get("rewrite_verifier")),
+            request_records=list(value.get("request_records", [])),
+            errors=list(value.get("errors", [])),
+        )
+
 
 class EvolutionEngine:
     """Run the analyzer → merger → dual-generator → audit pipeline once."""
@@ -318,8 +364,11 @@ class EvolutionEngine:
             try:
                 raw = _meta(self.client, "failure_analyzer", context, self.token_budget)
                 failure = normalize_failure_ir(_parse(raw))
-                failure.setdefault("trace_id", record.get("trace_id"))
-                failure.setdefault("task_id", record.get("task_id"))
+                # Provenance is owned by the observed trajectory row.  A
+                # model/fake cannot manufacture a supporting trace or task
+                # identity in its Failure IR response.
+                failure["trace_id"] = record.get("trace_id")
+                failure["task_id"] = record.get("task_id")
                 result.failures.append(failure)
                 if _record(raw):
                     result.request_records.append(_record(raw))
@@ -332,8 +381,8 @@ class EvolutionEngine:
             try:
                 raw = _meta(self.client, "success_analyzer", context, self.token_budget)
                 preservation = normalize_preservation_ir(_parse(raw))
-                preservation.setdefault("trace_id", record.get("trace_id"))
-                preservation.setdefault("task_id", record.get("task_id"))
+                preservation["trace_id"] = record.get("trace_id")
+                preservation["task_id"] = record.get("task_id")
                 result.preservations.append(preservation)
                 if _record(raw):
                     result.request_records.append(_record(raw))
