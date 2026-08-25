@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -126,10 +127,74 @@ def test_factory_scopes_data_path_and_writes_random_seed(monkeypatch=None):
             game = train / "pick_and_place_simple-Vase-None-Safe-1" / "trial_T" / "game.tw-pddl"
             game.parent.mkdir(parents=True)
             game.write_text("", encoding="utf-8")
-            adapter = create_alfworld_env(train, str(game.relative_to(train)), config={}, environment_seed=41)
+            data_home = train.parent.parent
+            logic = data_home / "logic"
+            logic.mkdir(parents=True)
+            domain = logic / "alfred.pddl"
+            grammar = logic / "alfred.twl2"
+            domain.write_text("domain", encoding="utf-8")
+            grammar.write_text("grammar", encoding="utf-8")
+            old_data_env = os.environ.pop("ALFWORLD_DATA", None)
+            try:
+                adapter = create_alfworld_env(train, str(game.relative_to(train)), config={}, environment_seed=41)
+            finally:
+                if old_data_env is not None:
+                    os.environ["ALFWORLD_DATA"] = old_data_env
             assert captured["config"]["dataset"]["data_path"] == str(game.parent)
             assert captured["config"]["general"]["random_seed"] == 41
+            assert captured["config"]["logic"]["domain"] == str(domain.resolve())
+            assert captured["config"]["logic"]["grammar"] == str(grammar.resolve())
+            assert Path(captured["config"]["logic"]["domain"]).is_absolute()
+            assert Path(captured["config"]["logic"]["grammar"]).is_absolute()
             assert adapter.environment_seed == 41
+    finally:
+        for name, value in old.items():
+            if value is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = value
+
+
+def test_factory_rejects_missing_alfworld_logic_files_before_environment_init():
+    """A missing derived data-home logic file is a clear fail-closed error."""
+    from stage0_alfworld import create_alfworld_env
+
+    class FakeEnv:
+        def reset(self):
+            return "obs", {}
+
+        def step(self, actions):
+            return "obs", 0, True, {}
+
+    class Factory:
+        def __init__(self, config):
+            raise AssertionError("environment must not initialize with missing logic files")
+
+    environment = ModuleType("alfworld.agents.environment")
+    environment.get_environment = lambda env_type: (lambda config, train_eval: Factory(config))
+    agents = ModuleType("alfworld.agents")
+    alfworld = ModuleType("alfworld")
+    agents.environment = environment
+    alfworld.agents = agents
+    old = {name: sys.modules.get(name) for name in ("alfworld", "alfworld.agents", "alfworld.agents.environment")}
+    sys.modules["alfworld"] = alfworld
+    sys.modules["alfworld.agents"] = agents
+    sys.modules["alfworld.agents.environment"] = environment
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            train = Path(tmp) / "json_2.1.1" / "train"
+            game = train / "pick_and_place_simple-Vase-None-Safe-1" / "trial_T" / "game.tw-pddl"
+            game.parent.mkdir(parents=True)
+            game.write_text("", encoding="utf-8")
+            try:
+                create_alfworld_env(train, str(game.relative_to(train)), config={})
+            except AlfredTWEnvDependencyError as exc:
+                message = str(exc).casefold()
+                assert "logic" in message
+                assert "alfred.pddl" in message
+                assert "alfred.twl2" in message
+            else:
+                raise AssertionError("missing ALFWorld logic files must fail closed")
     finally:
         for name, value in old.items():
             if value is None:

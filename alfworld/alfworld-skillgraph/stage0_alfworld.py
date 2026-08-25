@@ -107,10 +107,24 @@ def create_alfworld_env(
         config_dict = _load_yaml_config(config_file)
     else:
         config_dict = copy.deepcopy(dict(config))
+    data_home = (train.parent.parent).resolve()
+    logic_dir = data_home / "logic"
+    logic_domain = (logic_dir / "alfred.pddl").resolve()
+    logic_grammar = (logic_dir / "alfred.twl2").resolve()
+    missing_logic = [path for path in (logic_domain, logic_grammar) if not path.is_file()]
+    if missing_logic:
+        missing = ", ".join(str(path) for path in missing_logic)
+        raise AlfredTWEnvDependencyError(
+            "ALFWorld logic assets are missing under the data home derived from train root "
+            f"({data_home}): {missing}"
+        )
     try:
         dataset = config_dict.setdefault("dataset", {})
         env_config = config_dict.setdefault("env", {})
         general = config_dict.setdefault("general", {})
+        logic = config_dict.setdefault("logic", {})
+        if not isinstance(logic, dict):
+            raise ValueError("ALFWorld config logic section must be a mapping")
         # AlfredTWEnv recursively scans data_path during construction.  The
         # manifest already resolved an exact game file, so scope the config
         # to that trial directory and avoid rescanning the full 3.5k-task
@@ -123,6 +137,8 @@ def create_alfworld_env(
             # the adapter, so a resumed paired episode is reproducible.
             env_config["seed"] = environment_seed
             general["random_seed"] = environment_seed
+        logic["domain"] = str(logic_domain)
+        logic["grammar"] = str(logic_grammar)
         # The train split normally enables expert-plan wrappers for dagger;
         # Stage 0 must never expose expert trajectories to the Executor.
         general["training_method"] = "dqn"
