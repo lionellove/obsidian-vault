@@ -52,6 +52,23 @@ class FakeTransport:
         )
 
 
+class SequenceTransport:
+    """Provider boundary fixture returning one response per request."""
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def post_json(self, url, headers, payload, timeout):
+        self.calls.append({"url": url, "headers": dict(headers), "payload": payload, "timeout": timeout})
+        response = self.responses.pop(0)
+        return TransportResponse(
+            status_code=200,
+            headers={"X-Request-ID": f"retry_req_{len(self.calls)}"},
+            body=response,
+        )
+
+
 def test_executor_request_contract_and_response_metadata():
     transport = FakeTransport()
     client = DeepSeekClient(transport=transport, api_key="secret-for-memory-only")
@@ -129,6 +146,97 @@ def test_meta_roles_share_context_and_budget_and_enable_max_thinking():
     assert first["max_tokens"] == second["max_tokens"] == 777
     assert first["thinking"] == second["thinking"] == {"type": "enabled"}
     assert first["reasoning_effort"] == second["reasoning_effort"] == "max"
+
+
+def test_meta_json_empty_content_is_retried_and_all_attempts_are_audited():
+    empty = {
+        "id": "empty",
+        "model": "deepseek-v4-flash",
+        "system_fingerprint": "fp_retry",
+        "choices": [{"finish_reason": "stop", "message": {"content": "", "reasoning_content": "thinking"}}],
+        "usage": {
+            "prompt_tokens": 10,
+            "prompt_cache_hit_tokens": 0,
+            "prompt_cache_miss_tokens": 10,
+            "completion_tokens": 4,
+            "completion_tokens_details": {"reasoning_tokens": 4},
+        },
+    }
+    success = {
+        "id": "success",
+        "model": "deepseek-v4-flash",
+        "system_fingerprint": "fp_retry",
+        "choices": [{"finish_reason": "stop", "message": {"content": '{"skill_package": {}}'}}],
+        "usage": {
+            "prompt_tokens": 12,
+            "prompt_cache_hit_tokens": 8,
+            "prompt_cache_miss_tokens": 4,
+            "completion_tokens": 5,
+            "completion_tokens_details": {"reasoning_tokens": 1},
+        },
+    }
+    transport = SequenceTransport([empty, empty, success])
+    client = DeepSeekClient(transport=transport, api_key="secret")
+
+    result = client.complete_meta(role="s0_generator", context={}, token_budget=64)
+
+    assert result.content == '{"skill_package": {}}'
+    assert len(transport.calls) == 3
+    assert [call["payload"]["max_tokens"] for call in transport.calls] == [64, 128, 256]
+    assert len(client.request_records) == 3
+    assert [record["attempt"] for record in client.request_records] == [1, 2, 3]
+    assert all(record["max_attempts"] == 3 for record in client.request_records)
+    assert client.request_records[0]["error"] == "DeepSeek response contained empty content"
+    assert client.request_records[0]["raw_response"]["choices"][0]["finish_reason"] == "stop"
+    assert client.request_records[0]["usage"]["reasoning_tokens"] == 4
+    assert "previous provider response was empty" in transport.calls[1]["payload"]["messages"][0]["content"].casefold()
+    assert transport.calls[0]["payload"]["messages"][1] == transport.calls[2]["payload"]["messages"][1]
+    assert "secret" not in json.dumps(client.request_records)
+
+
+def test_meta_json_empty_content_stops_after_three_attempts():
+    empty = {
+        "id": "always_empty",
+        "model": "deepseek-v4-flash",
+        "system_fingerprint": "fp_retry",
+        "choices": [{"finish_reason": "stop", "message": {"content": ""}}],
+        "usage": {
+            "prompt_tokens": 1,
+            "prompt_cache_hit_tokens": 0,
+            "prompt_cache_miss_tokens": 1,
+            "completion_tokens": 0,
+        },
+    }
+    transport = SequenceTransport([empty, empty, empty])
+    client = DeepSeekClient(transport=transport, api_key="secret")
+
+    try:
+        client.complete_meta(role="s0_generator", context={}, token_budget=64)
+    except DeepSeekAPIError as exc:
+        assert str(exc) == "DeepSeek response contained empty content after 3 attempts"
+    else:
+        raise AssertionError("expected bounded empty-content failure")
+
+    assert len(transport.calls) == 3
+    assert len(client.request_records) == 3
+    assert all(record["raw_response"]["id"] == "always_empty" for record in client.request_records)
+
+
+def test_meta_json_initial_prompt_contains_an_example_output_shape():
+    transport = FakeTransport(
+        response={
+            "model": "deepseek-v4-flash",
+            "choices": [{"message": {"content": '{"skill_package": {}}'}}],
+            "usage": {},
+        }
+    )
+    client = DeepSeekClient(transport=transport, api_key="secret")
+
+    client.complete_meta(role="s0_generator", context={}, token_budget=64)
+
+    system_prompt = transport.calls[0]["payload"]["messages"][0]["content"]
+    assert "example json output" in system_prompt.casefold()
+    assert '"skill_package"' in system_prompt
 
 
 def test_api_error_is_recorded_without_secret():

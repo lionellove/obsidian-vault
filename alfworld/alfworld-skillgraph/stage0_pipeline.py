@@ -381,7 +381,47 @@ class Stage0Pipeline:
         if self.data_fingerprint is None:
             self.data_fingerprint = sha256(canonical({"data_root": str(self.data_root) if self.data_root else None, "manifests": manifests, "denylist": sorted(self.denylist)}))
         generator = S0Generator(self.client)
-        generated = generator.generate()
+        request_records_path = self.layout.path("s0/request_records.json")
+        previous_records: list[dict[str, Any]] = []
+        if request_records_path.is_file():
+            previous_payload = _read_json(request_records_path)
+            if isinstance(previous_payload, list):
+                previous_records = [copy.deepcopy(record) for record in previous_payload if isinstance(record, dict)]
+
+        def merged_request_records(*groups: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+            merged: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for group in groups:
+                for record in group:
+                    if not isinstance(record, dict):
+                        continue
+                    marker = sha256(canonical(record))
+                    if marker in seen:
+                        continue
+                    seen.add(marker)
+                    merged.append(copy.deepcopy(record))
+            return merged
+
+        try:
+            generated = generator.generate()
+        except Exception as exc:
+            client_records = getattr(self.client, "request_records", [])
+            all_records = merged_request_records(
+                previous_records,
+                client_records if isinstance(client_records, list) else [],
+            )
+            self.layout.write_json("s0/request_records.json", all_records)
+            self.layout.write_json(
+                "s0/generation_error.json",
+                {"error": str(exc), "request_count": len(all_records), "status": "s0_generation_error"},
+            )
+            raise
+        client_records = getattr(self.client, "request_records", [])
+        all_records = merged_request_records(
+            previous_records,
+            client_records if isinstance(client_records, list) else [],
+            generated.request_records,
+        )
         self.layout.write_text("s0/generation_prompt.txt", generated.generation_prompt)
         self.layout.write_json("s0/raw_response.json", generated.raw_response)
         self.layout.write_json(
@@ -391,7 +431,7 @@ class Stage0Pipeline:
         if generated.skill is not None:
             self.layout.write_json("s0/skill_package.json", generated.skill)
             self.layout.write_text("s0/rendered_skill.md", generated.rendered_skill or render_skill(generated.skill))
-        self.layout.write_json("s0/request_records.json", generated.request_records)
+        self.layout.write_json("s0/request_records.json", all_records)
         state = {
             "pipeline_version": PIPELINE_VERSION,
             "run_dir": str(self.layout.root),
@@ -422,7 +462,7 @@ class Stage0Pipeline:
             "artifact_hashes": self._record_hashes(),
             "frozen_artifact_hashes": {},
             "checkpoint": {"completed": {}, "max_episode_budget": 5 * self.testing_plan_size},
-            "request_records": list(generated.request_records),
+            "request_records": all_records,
             "errors": [],
         }
         self._write_state(state)

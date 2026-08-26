@@ -17,6 +17,8 @@ from urllib import error, request
 
 MODEL_ID = "deepseek-v4-flash"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
+META_EMPTY_MAX_ATTEMPTS = 3
+META_RETRY_MAX_TOKEN_BUDGET = 8192
 ROLE_DEFAULTS: dict[str, dict[str, Any]] = {
     "executor": {
         "thinking": {"type": "disabled"},
@@ -83,6 +85,51 @@ META_ROLE_SCHEMAS: dict[str, dict[str, Any]] = {
     "failure_analyzer": {"type": "object", "required": ["failure_id", "trace_id", "task_id"], "additionalProperties": True},
     "success_analyzer": {"type": "object", "required": ["preservation_id", "trace_id", "task_id"], "additionalProperties": True},
     "root_cause_merger": {"type": "object", "required": ["root_causes"], "additionalProperties": False},
+}
+
+# DeepSeek JSON mode explicitly recommends an example of the requested JSON
+# shape.  Values remain generic placeholders so the example cannot leak an
+# ALFWorld task instance or privileged trajectory evidence.
+META_ROLE_EXAMPLES: dict[str, dict[str, Any]] = {
+    "s0_generator": {
+        "skill_package": {
+            "schema_version": "0.1",
+            "package_id": "general-skill-package",
+            "entry_node": "observe",
+            "nodes": [
+                {
+                    "id": "observe",
+                    "type": "decision",
+                    "instruction": "<general instruction>",
+                    "scope": {"level": "global"},
+                }
+            ],
+            "edges": [],
+            "constraints": [],
+            "verifications": [],
+            "fallbacks": [],
+        }
+    },
+    "failure_analyzer": {"failure_id": "<id>", "trace_id": "<trace>", "task_id": "<task>"},
+    "success_analyzer": {"preservation_id": "<id>", "trace_id": "<trace>", "task_id": "<task>"},
+    "root_cause_merger": {"root_causes": []},
+    "structured_patch": {"semantic_patch": {"root_cause_id": "<id>", "edits": []}},
+    "full_rewrite": {
+        "full_rewrite": {
+            "root_cause_id": "<id>",
+            "rewritten_skill_package": {},
+            "change_manifest": [],
+        }
+    },
+    "semantic_verifier": {
+        "relevance": 0.0,
+        "generality": 0.0,
+        "contradiction": 0.0,
+        "redundancy": 0.0,
+        "over_specificity": 0.0,
+        "root_cause_coverage": 0.0,
+        "preservation_risk": 0.0,
+    },
 }
 
 
@@ -370,9 +417,6 @@ class DeepSeekClient:
                     raise DeepSeekAPIError("DeepSeek response body was not valid JSON") from exc
             if not isinstance(response_body, Mapping):
                 raise DeepSeekAPIError("DeepSeek response body must be an object")
-            content = _extract_content(response_body).strip()
-            if not content:
-                raise DeepSeekAPIError("DeepSeek response contained empty content")
             record["raw_response"] = dict(response_body)
             record["model"] = response_body.get("model")
             record["system_fingerprint"] = response_body.get("system_fingerprint")
@@ -382,6 +426,9 @@ class DeepSeekClient:
                 or response_body.get("id")
             )
             record["usage"] = _normalize_usage(response_body)
+            content = _extract_content(response_body).strip()
+            if not content:
+                raise DeepSeekAPIError("DeepSeek response contained empty content")
             record["latency_seconds"] = time.perf_counter() - started
             self.request_records.append(record)
             return LLMResult(content=content, record=record, raw_response=dict(response_body))
@@ -411,14 +458,41 @@ class DeepSeekClient:
             META_ROLE_PROMPTS[role]
             + "\nThe response must be valid JSON. Local schema contract (enforced after the response):\n"
             + json.dumps(schema, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            + "\nExample JSON output shape:\n"
+            + json.dumps(META_ROLE_EXAMPLES[role], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         )
-        return self.complete(
-            role=role,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": context},
-            ],
-            token_budget=token_budget,
-            response_format={"type": "json_object"},
-            stage0_schema={"name": f"stage0_{role}", "schema": schema},
-        )
+        for attempt in range(1, META_EMPTY_MAX_ATTEMPTS + 1):
+            retry_budget_ceiling = max(token_budget, META_RETRY_MAX_TOKEN_BUDGET)
+            attempt_token_budget = min(token_budget * (2 ** (attempt - 1)), retry_budget_ceiling)
+            attempt_prompt = system_prompt
+            if attempt > 1:
+                attempt_prompt += (
+                    "\nProvider retry instruction: The previous provider response was empty. "
+                    "Return exactly one non-empty JSON object now; do not emit only reasoning or whitespace."
+                )
+            try:
+                result = self.complete(
+                    role=role,
+                    messages=[
+                        {"role": "system", "content": attempt_prompt},
+                        {"role": "user", "content": context},
+                    ],
+                    token_budget=attempt_token_budget,
+                    response_format={"type": "json_object"},
+                    stage0_schema={"name": f"stage0_{role}", "schema": schema},
+                )
+            except DeepSeekAPIError as exc:
+                if self.request_records:
+                    self.request_records[-1]["attempt"] = attempt
+                    self.request_records[-1]["max_attempts"] = META_EMPTY_MAX_ATTEMPTS
+                if str(exc) != "DeepSeek response contained empty content":
+                    raise
+                if attempt == META_EMPTY_MAX_ATTEMPTS:
+                    raise DeepSeekAPIError(
+                        f"DeepSeek response contained empty content after {META_EMPTY_MAX_ATTEMPTS} attempts"
+                    ) from exc
+                continue
+            result.record["attempt"] = attempt
+            result.record["max_attempts"] = META_EMPTY_MAX_ATTEMPTS
+            return result
+        raise AssertionError("unreachable DeepSeek meta retry state")

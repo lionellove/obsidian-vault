@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from stage0_core import canonical
+from stage0_llm import DeepSeekClient, TransportResponse
 from stage0_pipeline import Stage0Pipeline, Stage0ArtifactLayout
 from stage0_run import baseline_skill
 
@@ -58,6 +59,57 @@ def test_prepare_pauses_for_human_gate_and_approve_freezes_hashes():
         assert approved["status"] == "approved"
         assert (root / "s0" / "skill_package.sha256").exists()
         assert pipeline.status()["status"] == "approved"
+
+
+def test_prepare_persists_every_empty_content_retry_record():
+    empty = {
+        "id": "empty",
+        "model": "deepseek-v4-flash",
+        "system_fingerprint": "fp_prepare",
+        "choices": [{"message": {"content": ""}}],
+        "usage": {
+            "prompt_tokens": 2,
+            "prompt_cache_hit_tokens": 0,
+            "prompt_cache_miss_tokens": 2,
+            "completion_tokens": 0,
+        },
+    }
+    success = {
+        "id": "success",
+        "model": "deepseek-v4-flash",
+        "system_fingerprint": "fp_prepare",
+        "choices": [{"message": {"content": json.dumps(baseline_skill())}}],
+        "usage": {
+            "prompt_tokens": 3,
+            "prompt_cache_hit_tokens": 1,
+            "prompt_cache_miss_tokens": 2,
+            "completion_tokens": 10,
+        },
+    }
+
+    class RetryTransport:
+        def __init__(self):
+            self.responses = [empty, empty, success]
+
+        def post_json(self, url, headers, payload, timeout):
+            return TransportResponse(200, {}, self.responses.pop(0))
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        client = DeepSeekClient(transport=RetryTransport(), api_key="secret")
+        state = Stage0Pipeline(
+            root,
+            client=client,
+            task_manifests=_manifests(),
+            testing_plan_size=3,
+        ).prepare()
+
+        records = json.loads((root / "s0" / "request_records.json").read_text(encoding="utf-8"))
+        assert state["status"] == "awaiting_human_gate"
+        assert len(records) == 3
+        assert [record["attempt"] for record in records] == [1, 2, 3]
+        assert records[0]["error"] == "DeepSeek response contained empty content"
+        assert state["request_records"] == records
 
 
 def test_resume_fails_closed_when_frozen_hash_changes():
