@@ -41,6 +41,30 @@ def test_s0_generator_uses_only_public_context_and_freezes_render_hash():
         assert forbidden not in context_text
 
 
+def test_s0_generator_default_budget_leaves_room_after_max_reasoning():
+    client = FakeS0Client([baseline_skill()])
+
+    result = S0Generator(client).generate()
+
+    assert result.status == "awaiting_human_gate"
+    assert client.calls[0][2] == 8192
+
+
+def test_s0_generator_rejects_string_artifacts_and_regenerates():
+    malformed = baseline_skill()
+    package = malformed["skill_package"]
+    package["constraints"] = ["use admissible actions"]
+    package["verifications"] = ["verify progress"]
+    package["fallbacks"] = ["retry safely"]
+    client = FakeS0Client([malformed, baseline_skill()])
+
+    result = S0Generator(client).generate()
+
+    assert result.status == "awaiting_human_gate"
+    assert len(client.calls) == 2
+    assert client.calls[1][1]["gate_feedback"] == ["schema_valid", "within_budget"]
+
+
 def test_s0_generator_returns_gate_feedback_only_and_retries_at_most_three_times():
     invalid = {"skill_package": {"schema_version": "wrong"}}
     client = FakeS0Client([invalid, baseline_skill()])

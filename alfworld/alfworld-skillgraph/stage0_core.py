@@ -295,7 +295,7 @@ def validate_skill(
                 errors.append(f"{label} exceed budget of {max_items_per_artifact}")
         try:
             word_count = len(re.findall(r"\b[\w'-]+\b", render_skill(skill)))
-        except (KeyError, TypeError):
+        except (AttributeError, KeyError, TypeError):
             word_count = max_words + 1
         if word_count > max_words:
             errors.append("rendered skill exceeds word budget")

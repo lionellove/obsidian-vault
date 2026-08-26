@@ -124,7 +124,7 @@ class S0GenerationResult:
 class S0Generator:
     """Generate S0 without access to any task instance or trajectory."""
 
-    def __init__(self, client: Any, *, token_budget: int = 2048, max_attempts: int = 3) -> None:
+    def __init__(self, client: Any, *, token_budget: int = 8192, max_attempts: int = 3) -> None:
         if isinstance(token_budget, bool) or not isinstance(token_budget, int) or token_budget <= 0:
             raise ValueError("token_budget must be a positive integer")
         if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or not 1 <= max_attempts <= 3:

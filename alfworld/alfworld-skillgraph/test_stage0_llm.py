@@ -222,6 +222,61 @@ def test_meta_json_empty_content_stops_after_three_attempts():
     assert all(record["raw_response"]["id"] == "always_empty" for record in client.request_records)
 
 
+def test_s0_length_truncation_retries_expand_beyond_initial_safe_budget():
+    empty_at_length = {
+        "id": "length",
+        "model": "deepseek-v4-flash",
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {"content": "", "reasoning_content": "thinking"},
+            }
+        ],
+        "usage": {"completion_tokens": 8192},
+    }
+    success = {
+        "id": "success",
+        "model": "deepseek-v4-flash",
+        "choices": [{"finish_reason": "stop", "message": {"content": '{"skill_package": {}}'}}],
+        "usage": {},
+    }
+    transport = SequenceTransport([empty_at_length, empty_at_length, success])
+    client = DeepSeekClient(transport=transport, api_key="secret")
+
+    result = client.complete_meta(role="s0_generator", context={}, token_budget=8192)
+
+    assert result.content == '{"skill_package": {}}'
+    assert [call["payload"]["max_tokens"] for call in transport.calls] == [8192, 16384, 32768]
+
+
+def test_nonempty_truncated_json_is_retried_before_local_validation():
+    truncated = {
+        "id": "truncated",
+        "model": "deepseek-v4-flash",
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {"content": '{"skill_package": {}}', "reasoning_content": "thinking"},
+            }
+        ],
+        "usage": {"completion_tokens": 8192},
+    }
+    success = {
+        "id": "success",
+        "model": "deepseek-v4-flash",
+        "choices": [{"finish_reason": "stop", "message": {"content": '{"skill_package": {"done": true}}'}}],
+        "usage": {},
+    }
+    transport = SequenceTransport([truncated, success])
+    client = DeepSeekClient(transport=transport, api_key="secret")
+
+    result = client.complete_meta(role="s0_generator", context={}, token_budget=8192)
+
+    assert result.content == '{"skill_package": {"done": true}}'
+    assert [call["payload"]["max_tokens"] for call in transport.calls] == [8192, 16384]
+    assert client.request_records[0]["error"] == "DeepSeek response was truncated at max_tokens"
+
+
 def test_meta_json_initial_prompt_contains_an_example_output_shape():
     transport = FakeTransport(
         response={
@@ -237,6 +292,26 @@ def test_meta_json_initial_prompt_contains_an_example_output_shape():
     system_prompt = transport.calls[0]["payload"]["messages"][0]["content"]
     assert "example json output" in system_prompt.casefold()
     assert '"skill_package"' in system_prompt
+
+
+def test_s0_example_describes_every_artifact_object_shape():
+    transport = FakeTransport(
+        response={
+            "model": "deepseek-v4-flash",
+            "choices": [{"message": {"content": '{"skill_package": {}}'}}],
+            "usage": {},
+        }
+    )
+    client = DeepSeekClient(transport=transport, api_key="secret")
+
+    client.complete_meta(role="s0_generator", context={}, token_budget=64)
+
+    system_prompt = transport.calls[0]["payload"]["messages"][0]["content"]
+    assert '"constraints":[{' in system_prompt
+    assert '"verifications":[{' in system_prompt
+    assert '"fallbacks":[{' in system_prompt
+    for required_field in ('"rule"', '"criterion"', '"on_failure"', '"trigger"', '"max_retries"'):
+        assert required_field in system_prompt
 
 
 def test_api_error_is_recorded_without_secret():

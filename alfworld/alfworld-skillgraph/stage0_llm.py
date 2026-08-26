@@ -19,6 +19,7 @@ MODEL_ID = "deepseek-v4-flash"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 META_EMPTY_MAX_ATTEMPTS = 3
 META_RETRY_MAX_TOKEN_BUDGET = 8192
+META_ROLE_RETRY_MAX_TOKEN_BUDGETS = {"s0_generator": 32768}
 ROLE_DEFAULTS: dict[str, dict[str, Any]] = {
     "executor": {
         "thinking": {"type": "disabled"},
@@ -100,14 +101,72 @@ META_ROLE_EXAMPLES: dict[str, dict[str, Any]] = {
                 {
                     "id": "observe",
                     "type": "decision",
-                    "instruction": "<general instruction>",
+                    "instruction": "Inspect the public observation and determine the next unmet subgoal.",
+                    "scope": {"level": "global"},
+                },
+                {
+                    "id": "select_object",
+                    "type": "decision",
+                    "instruction": "Select a generally described object relevant to the current subgoal.",
+                    "scope": {"level": "global"},
+                },
+                {
+                    "id": "acquire",
+                    "type": "action",
+                    "instruction": "Choose one admissible action that advances object acquisition.",
+                    "scope": {"level": "global"},
+                },
+                {
+                    "id": "transform",
+                    "type": "action",
+                    "instruction": "Apply a required state transformation only when the goal requires it.",
+                    "scope": {"level": "global"},
+                },
+                {
+                    "id": "place",
+                    "type": "action",
+                    "instruction": "Choose one admissible action that advances placement at the goal receptacle.",
+                    "scope": {"level": "global"},
+                },
+                {
+                    "id": "verify",
+                    "type": "verification",
+                    "instruction": "Verify goal progress from the latest public observation.",
+                    "scope": {"level": "global"},
+                },
+            ],
+            "edges": [
+                {"id": "e1", "source": "observe", "target": "select_object", "condition": "a subgoal remains"},
+                {"id": "e2", "source": "select_object", "target": "acquire", "condition": "an object is selected"},
+                {"id": "e3", "source": "acquire", "target": "transform", "condition": "acquisition is established"},
+                {"id": "e4", "source": "transform", "target": "place", "condition": "required state is established or unnecessary"},
+                {"id": "e5", "source": "place", "target": "verify", "condition": "placement was attempted"},
+            ],
+            "constraints": [
+                {
+                    "id": "c1",
+                    "scope": {"level": "global"},
+                    "rule": "Choose exactly one currently admissible environment action.",
+                }
+            ],
+            "verifications": [
+                {
+                    "id": "v1",
+                    "target": "verify",
+                    "criterion": "The latest observation supports completion or identifies the next unmet subgoal.",
+                    "on_failure": "f1",
                     "scope": {"level": "global"},
                 }
             ],
-            "edges": [],
-            "constraints": [],
-            "verifications": [],
-            "fallbacks": [],
+            "fallbacks": [
+                {
+                    "id": "f1",
+                    "trigger": "The latest action did not establish the expected progress.",
+                    "target": "observe",
+                    "max_retries": 1,
+                    "scope": {"level": "global"},
+                }
+            ],
         }
     },
     "failure_analyzer": {"failure_id": "<id>", "trace_id": "<trace>", "task_id": "<task>"},
@@ -426,7 +485,13 @@ class DeepSeekClient:
                 or response_body.get("id")
             )
             record["usage"] = _normalize_usage(response_body)
+            choices = response_body.get("choices")
+            first_choice = choices[0] if isinstance(choices, list) and choices else None
+            finish_reason = first_choice.get("finish_reason") if isinstance(first_choice, Mapping) else None
+            record["finish_reason"] = finish_reason
             content = _extract_content(response_body).strip()
+            if finish_reason == "length":
+                raise DeepSeekAPIError("DeepSeek response was truncated at max_tokens")
             if not content:
                 raise DeepSeekAPIError("DeepSeek response contained empty content")
             record["latency_seconds"] = time.perf_counter() - started
@@ -462,12 +527,15 @@ class DeepSeekClient:
             + json.dumps(META_ROLE_EXAMPLES[role], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         )
         for attempt in range(1, META_EMPTY_MAX_ATTEMPTS + 1):
-            retry_budget_ceiling = max(token_budget, META_RETRY_MAX_TOKEN_BUDGET)
+            configured_ceiling = META_ROLE_RETRY_MAX_TOKEN_BUDGETS.get(
+                role, META_RETRY_MAX_TOKEN_BUDGET
+            )
+            retry_budget_ceiling = max(token_budget, configured_ceiling)
             attempt_token_budget = min(token_budget * (2 ** (attempt - 1)), retry_budget_ceiling)
             attempt_prompt = system_prompt
             if attempt > 1:
                 attempt_prompt += (
-                    "\nProvider retry instruction: The previous provider response was empty. "
+                    "\nProvider retry instruction: The previous provider response was empty or truncated. "
                     "Return exactly one non-empty JSON object now; do not emit only reasoning or whitespace."
                 )
             try:
@@ -485,12 +553,13 @@ class DeepSeekClient:
                 if self.request_records:
                     self.request_records[-1]["attempt"] = attempt
                     self.request_records[-1]["max_attempts"] = META_EMPTY_MAX_ATTEMPTS
-                if str(exc) != "DeepSeek response contained empty content":
+                if str(exc) not in {
+                    "DeepSeek response contained empty content",
+                    "DeepSeek response was truncated at max_tokens",
+                }:
                     raise
                 if attempt == META_EMPTY_MAX_ATTEMPTS:
-                    raise DeepSeekAPIError(
-                        f"DeepSeek response contained empty content after {META_EMPTY_MAX_ATTEMPTS} attempts"
-                    ) from exc
+                    raise DeepSeekAPIError(f"{exc} after {META_EMPTY_MAX_ATTEMPTS} attempts") from exc
                 continue
             result.record["attempt"] = attempt
             result.record["max_attempts"] = META_EMPTY_MAX_ATTEMPTS
